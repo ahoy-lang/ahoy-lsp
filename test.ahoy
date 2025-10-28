@@ -1,0 +1,77 @@
+? Test file for Ahoy LSP
+? This file intentionally has both valid and invalid syntax for testing
+
+? Valid function
+func greet name string do
+    ahoy "Hello, " name
+end
+
+? Invalid function - missing 'do'
+func broken
+    ahoy "This should show an error"
+end
+
+? Valid loop
+loop i:1 to 10 do
+    ahoy i
+end
+
+
+? Valid if statement
+x: 42
+if x is 42 then
+    ahoy "The answer!"
+end
+
+? Variables for autocomplete testing
+my_variable: 100
+another_var: "test"
+test_bool: true
+
+? Invalid syntax - missing assignment operator
+bad_variable "this is wrong"
+
+? Valid switch
+color: "red"
+switch color on
+    "red" do
+        ahoy "Red color"
+    "blue" do
+        ahoy "Blue color"
+else
+    ahoy "Unknown color"
+end
+
+? Enum declaration
+status enum:
+    PENDING
+    ACTIVE
+    COMPLETE
+end
+
+? Struct declaration
+Point struct:
+    x int
+    y int
+end
+
+? Test operators
+result: 5 plus 3
+result2: 10 minus 2
+result3: 4 times 5
+result4: 20 div 4
+
+? Test boolean operators
+flag: true and false
+flag2: true or false
+flag3: not flag
+
+? Array operations
+numbers: [1, 2, 3, 4, 5]
+first: numbers[0]
+
+? Dictionary
+person: {"name": "Alice", "age": 30}
+name_val: person["name"]
+
+? This should trigger autocomplete when you type 'fu' or 'lo' or 'if'

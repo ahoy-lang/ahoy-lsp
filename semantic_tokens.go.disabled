@@ -1,0 +1,277 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+
+	"ahoy"
+
+	"go.lsp.dev/jsonrpc2"
+	"go.lsp.dev/protocol"
+)
+
+// Semantic token types
+const (
+	SemanticTokenTypeKeyword = iota
+	SemanticTokenTypeFunction
+	SemanticTokenTypeVariable
+	SemanticTokenTypeParameter
+	SemanticTokenTypeString
+	SemanticTokenTypeNumber
+	SemanticTokenTypeOperator
+	SemanticTokenTypeComment
+	SemanticTokenTypeType
+	SemanticTokenTypeEnum
+	SemanticTokenTypeEnumMember
+	SemanticTokenTypeStruct
+	SemanticTokenTypeProperty
+)
+
+// Semantic token modifiers
+const (
+	SemanticTokenModifierDeclaration = 1 << iota
+	SemanticTokenModifierDefinition
+	SemanticTokenModifierReadonly
+	SemanticTokenModifierStatic
+)
+
+func (s *Server) handleSemanticTokensFull(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
+	var params protocol.SemanticTokensParams
+	if err := json.Unmarshal(req.Params(), &params); err != nil {
+		return reply(ctx, nil, err)
+	}
+
+	doc := s.getDocument(params.TextDocument.URI)
+	if doc == nil || doc.AST == nil {
+		return reply(ctx, nil, nil)
+	}
+
+	// Build semantic tokens
+	builder := NewSemanticTokensBuilder()
+	builder.walkNode(doc.AST, doc.SymbolTable)
+
+	result := protocol.SemanticTokens{
+		Data: builder.Build(),
+	}
+
+	return reply(ctx, result, nil)
+}
+
+type SemanticTokensBuilder struct {
+	tokens []SemanticToken
+}
+
+type SemanticToken struct {
+	Line      int
+	Column    int
+	Length    int
+	TokenType int
+	Modifiers int
+}
+
+func NewSemanticTokensBuilder() *SemanticTokensBuilder {
+	return &SemanticTokensBuilder{
+		tokens: []SemanticToken{},
+	}
+}
+
+func (b *SemanticTokensBuilder) Add(line, column, length, tokenType, modifiers int) {
+	b.tokens = append(b.tokens, SemanticToken{
+		Line:      line,
+		Column:    column,
+		Length:    length,
+		TokenType: tokenType,
+		Modifiers: modifiers,
+	})
+}
+
+func (b *SemanticTokensBuilder) Build() []uint32 {
+	// Sort tokens by position
+	// (In a real implementation, you'd sort by line then column)
+
+	// Convert to LSP semantic tokens format (delta encoding)
+	data := []uint32{}
+	prevLine := 0
+	prevCol := 0
+
+	for _, token := range b.tokens {
+		// Delta line
+		deltaLine := token.Line - prevLine
+
+		// Delta column (0 if different line)
+		deltaCol := token.Column
+		if deltaLine == 0 {
+			deltaCol = token.Column - prevCol
+		}
+
+		data = append(data,
+			uint32(deltaLine),
+			uint32(deltaCol),
+			uint32(token.Length),
+			uint32(token.TokenType),
+			uint32(token.Modifiers),
+		)
+
+		prevLine = token.Line
+		prevCol = token.Column
+	}
+
+	return data
+}
+
+func (b *SemanticTokensBuilder) walkNode(node *ahoy.ASTNode, symbolTable *SymbolTable) {
+	if node == nil {
+		return
+	}
+
+	switch node.Type {
+	case ahoy.NODE_FUNCTION:
+		// Function name
+		b.Add(node.Line-1, 0, len(node.Value), SemanticTokenTypeFunction, SemanticTokenModifierDefinition)
+
+		// Walk children (parameters and body)
+		for _, child := range node.Children {
+			b.walkNode(child, symbolTable)
+		}
+
+	case ahoy.NODE_VARIABLE_DECLARATION, ahoy.NODE_ASSIGNMENT:
+		// Variable name
+		modifiers := SemanticTokenModifierDeclaration
+		b.Add(node.Line-1, 0, len(node.Value), SemanticTokenTypeVariable, modifiers)
+
+		// Walk value expression
+		if len(node.Children) > 0 {
+			b.walkNode(node.Children[0], symbolTable)
+		}
+
+	case ahoy.NODE_IDENTIFIER:
+		// Look up symbol to determine type
+		if symbolTable != nil {
+			sym := symbolTable.Lookup(node.Value)
+			if sym != nil {
+				tokenType := SemanticTokenTypeVariable
+				modifiers := 0
+
+				switch sym.Kind {
+				case SymbolKindFunction:
+					tokenType = SemanticTokenTypeFunction
+				case SymbolKindParameter:
+					tokenType = SemanticTokenTypeParameter
+				case SymbolKindEnum:
+					tokenType = SemanticTokenTypeEnum
+				case SymbolKindEnumValue:
+					tokenType = SemanticTokenTypeEnumMember
+				case SymbolKindStruct:
+					tokenType = SemanticTokenTypeStruct
+				case SymbolKindStructField:
+					tokenType = SemanticTokenTypeProperty
+				case SymbolKindConstant:
+					tokenType = SemanticTokenTypeVariable
+					modifiers = SemanticTokenModifierReadonly
+				}
+
+				b.Add(node.Line-1, 0, len(node.Value), tokenType, modifiers)
+			}
+		}
+
+	case ahoy.NODE_NUMBER:
+		b.Add(node.Line-1, 0, len(node.Value), SemanticTokenTypeNumber, 0)
+
+	case ahoy.NODE_STRING:
+		b.Add(node.Line-1, 0, len(node.Value)+2, SemanticTokenTypeString, 0) // +2 for quotes
+
+	case ahoy.NODE_BOOLEAN:
+		b.Add(node.Line-1, 0, len(node.Value), SemanticTokenTypeKeyword, 0)
+
+	case ahoy.NODE_ENUM_DECLARATION:
+		// Enum name
+		b.Add(node.Line-1, 0, len(node.Value), SemanticTokenTypeEnum, SemanticTokenModifierDefinition)
+
+		// Enum values
+		for _, child := range node.Children {
+			b.walkNode(child, symbolTable)
+		}
+
+	case ahoy.NODE_STRUCT_DECLARATION:
+		// Struct name
+		b.Add(node.Line-1, 0, len(node.Value), SemanticTokenTypeStruct, SemanticTokenModifierDefinition)
+
+		// Struct fields
+		for _, child := range node.Children {
+			b.walkNode(child, symbolTable)
+		}
+
+	case ahoy.NODE_CONSTANT_DECLARATION:
+		// Constant name
+		b.Add(node.Line-1, 0, len(node.Value), SemanticTokenTypeVariable, SemanticTokenModifierReadonly|SemanticTokenModifierDeclaration)
+
+		// Value
+		if len(node.Children) > 0 {
+			b.walkNode(node.Children[0], symbolTable)
+		}
+
+	case ahoy.NODE_CALL:
+		// Function call
+		b.Add(node.Line-1, 0, len(node.Value), SemanticTokenTypeFunction, 0)
+
+		// Arguments
+		for _, child := range node.Children {
+			b.walkNode(child, symbolTable)
+		}
+
+	case ahoy.NODE_BINARY_OP:
+		// Operator
+		b.Add(node.Line-1, 0, len(node.Value), SemanticTokenTypeOperator, 0)
+
+		// Operands
+		for _, child := range node.Children {
+			b.walkNode(child, symbolTable)
+		}
+
+	case ahoy.NODE_UNARY_OP:
+		// Operator
+		b.Add(node.Line-1, 0, len(node.Value), SemanticTokenTypeOperator, 0)
+
+		// Operand
+		if len(node.Children) > 0 {
+			b.walkNode(node.Children[0], symbolTable)
+		}
+
+	case ahoy.NODE_TYPE:
+		// Type annotation
+		b.Add(node.Line-1, 0, len(node.Value), SemanticTokenTypeType, 0)
+
+	default:
+		// Walk all children
+		for _, child := range node.Children {
+			b.walkNode(child, symbolTable)
+		}
+	}
+}
+
+// GetSemanticTokensLegend returns the legend for semantic tokens
+func GetSemanticTokensLegend() protocol.SemanticTokensLegend {
+	return protocol.SemanticTokensLegend{
+		TokenTypes: []string{
+			"keyword",
+			"function",
+			"variable",
+			"parameter",
+			"string",
+			"number",
+			"operator",
+			"comment",
+			"type",
+			"enum",
+			"enumMember",
+			"struct",
+			"property",
+		},
+		TokenModifiers: []string{
+			"declaration",
+			"definition",
+			"readonly",
+			"static",
+		},
+	}
+}
