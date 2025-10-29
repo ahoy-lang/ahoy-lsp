@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"runtime"
+	"runtime/debug"
+	"time"
 
 	"go.lsp.dev/jsonrpc2"
 )
@@ -18,6 +21,17 @@ func init() {
 
 func main() {
 	debugLog.Println("Starting Ahoy Language Server")
+
+	// Set aggressive garbage collection to prevent memory buildup
+	debug.SetGCPercent(20) // Run GC more frequently (default is 100)
+
+	// Set memory limit to prevent system crashes
+	// This will cause the runtime to GC more aggressively as we approach the limit
+	debug.SetMemoryLimit(500 * 1024 * 1024) // 500MB limit
+
+	// Start memory monitor goroutine
+	go monitorMemory()
+
 	ctx := context.Background()
 
 	// Create stdio stream for communication with editor
@@ -46,6 +60,29 @@ func main() {
 	}
 
 	debugLog.Println("Shutting down cleanly")
+}
+
+// monitorMemory periodically logs memory usage and forces GC if needed
+func monitorMemory() {
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		var m runtime.MemStats
+		runtime.ReadMemStats(&m)
+
+		allocMB := m.Alloc / 1024 / 1024
+		sysMB := m.Sys / 1024 / 1024
+
+		debugLog.Printf("Memory: Alloc=%dMB Sys=%dMB NumGC=%d", allocMB, sysMB, m.NumGC)
+
+		// Force GC if memory usage is high
+		if allocMB > 300 {
+			debugLog.Printf("High memory usage detected, forcing GC")
+			runtime.GC()
+			debug.FreeOSMemory()
+		}
+	}
 }
 
 // stdrwc implements io.ReadWriteCloser for stdio communication

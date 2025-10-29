@@ -38,11 +38,8 @@ func (s *Server) handleDocumentSymbol(ctx context.Context, reply jsonrpc2.Replie
 
 func shouldIncludeInOutline(sym *Symbol) bool {
 	switch sym.Kind {
-	case SymbolKindFunction, SymbolKindEnum, SymbolKindStruct, SymbolKindConstant:
+	case SymbolKindFunction, SymbolKindEnum, SymbolKindStruct, SymbolKindConstant, SymbolKindVariable:
 		return true
-	case SymbolKindVariable:
-		// Only include global variables (those in global scope)
-		return sym.Scope != nil && sym.Scope.Parent == nil
 	default:
 		return false
 	}
@@ -79,18 +76,8 @@ func symbolToDocumentSymbol(sym *Symbol) protocol.DocumentSymbol {
 		docSymbol.Detail = sym.Type
 	}
 
-	// Add children for functions (parameters), enums (values), structs (fields)
-	if sym.Scope != nil {
-		children := []protocol.DocumentSymbol{}
-		for _, childSym := range sym.Scope.Symbols {
-			if shouldIncludeAsChild(childSym) {
-				children = append(children, symbolToDocumentSymbol(childSym))
-			}
-		}
-		if len(children) > 0 {
-			docSymbol.Children = children
-		}
-	}
+	// Note: Children handling removed to prevent circular references and memory leaks
+	// Symbols are now shown flat without hierarchical nesting
 
 	return docSymbol
 }

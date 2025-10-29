@@ -16,20 +16,25 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 	}
 
 	doc := s.getDocument(params.TextDocument.URI)
-	if doc == nil {
-		return reply(ctx, nil, nil)
+	if doc == nil || doc.Lines == nil {
+		return reply(ctx, protocol.CompletionList{Items: []protocol.CompletionItem{}}, nil)
 	}
 
 	items := []protocol.CompletionItem{}
 
-	// Get the current line content
-	lines := strings.Split(doc.Content, "\n")
-	if int(params.Position.Line) >= len(lines) {
+	// Get the current line content from cached lines
+	if int(params.Position.Line) >= len(doc.Lines) || int(params.Position.Line) < 0 {
 		return reply(ctx, protocol.CompletionList{Items: items}, nil)
 	}
 
-	currentLine := lines[params.Position.Line]
-	if int(params.Position.Character) > len(currentLine) {
+	currentLine := doc.Lines[params.Position.Line]
+
+	// Additional safety checks
+	if len(currentLine) > 10000 {
+		return reply(ctx, protocol.CompletionList{Items: items}, nil)
+	}
+
+	if int(params.Position.Character) > len(currentLine) || int(params.Position.Character) < 0 {
 		return reply(ctx, protocol.CompletionList{Items: items}, nil)
 	}
 

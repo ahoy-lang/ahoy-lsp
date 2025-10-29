@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"strings"
 
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
@@ -21,7 +20,7 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 	}
 
 	// Get the word at the cursor position
-	word := getWordAtPosition(doc.Content, int(params.Position.Line), int(params.Position.Character))
+	word := getWordAtPosition(doc, int(params.Position.Line), int(params.Position.Character))
 	if word == "" {
 		return reply(ctx, nil, nil)
 	}
@@ -51,14 +50,23 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 }
 
 // getWordAtPosition extracts the word at the given position
-func getWordAtPosition(content string, line, character int) string {
-	lines := strings.Split(content, "\n")
-	if line < 0 || line >= len(lines) {
+// Uses cached document.Lines to avoid repeated string splitting
+func getWordAtPosition(doc *Document, line, character int) string {
+	if doc == nil || doc.Lines == nil {
+		return ""
+	}
+	
+	if line < 0 || line >= len(doc.Lines) {
 		return ""
 	}
 
-	currentLine := lines[line]
+	currentLine := doc.Lines[line]
 	if character < 0 || character >= len(currentLine) {
+		return ""
+	}
+
+	// Safety check on line length
+	if len(currentLine) > 10000 {
 		return ""
 	}
 

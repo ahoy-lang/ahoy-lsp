@@ -1,9 +1,9 @@
-module github.com/ahoy-lang/ahoy-lsp
+module ahoy-lsp
 
 go 1.25
 
 require (
-	github.com/ahoy-lang/ahoy v0.0.0
+	ahoy v0.0.0
 	go.lsp.dev/jsonrpc2 v0.10.0
 	go.lsp.dev/protocol v0.12.0
 	go.lsp.dev/uri v0.3.0
@@ -20,4 +20,4 @@ require (
 )
 
 // Use local ahoy package during development
-replace github.com/ahoy-lang/ahoy => ../ahoy
+replace ahoy => ../ahoy

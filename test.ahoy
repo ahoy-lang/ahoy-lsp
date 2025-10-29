@@ -2,12 +2,11 @@
 ? This file intentionally has both valid and invalid syntax for testing
 
 ? Valid function
-func greet name string do
-    ahoy "Hello, " name
-end
+greet :: |name:string| string:
+	ahoy |"Hello, "|
 
 ? Invalid function - missing 'do'
-func broken
+func do
     ahoy "This should show an error"
 end
 
@@ -34,13 +33,9 @@ bad_variable "this is wrong"
 ? Valid switch
 color: "red"
 switch color on
-    "red" do
-        ahoy "Red color"
-    "blue" do
-        ahoy "Blue color"
-else
-    ahoy "Unknown color"
-end
+    "red" do ahoy|"Red color"|
+    "blue" do ahoy|"Blue color"|
+else ahoy "Unknown color"
 
 ? Enum declaration
 status enum:

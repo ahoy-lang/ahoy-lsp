@@ -15,16 +15,30 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 		return reply(ctx, nil, err)
 	}
 
+	debugLog.Printf("Hover request at line %d, char %d", params.Position.Line, params.Position.Character)
+
 	doc := s.getDocument(params.TextDocument.URI)
 	if doc == nil || doc.SymbolTable == nil {
 		return reply(ctx, nil, nil)
 	}
 
+	// Safety check: prevent processing huge files
+	if len(doc.Content) > 1000000 {
+		return reply(ctx, nil, nil)
+	}
+
+	// Validate position bounds
+	if int(params.Position.Line) < 0 || int(params.Position.Character) < 0 {
+		return reply(ctx, nil, nil)
+	}
+
 	// Get the word at the cursor position
-	word := getWordAtPosition(doc.Content, int(params.Position.Line), int(params.Position.Character))
+	word := getWordAtPosition(doc, int(params.Position.Line), int(params.Position.Character))
 	if word == "" {
 		return reply(ctx, nil, nil)
 	}
+
+	debugLog.Printf("Hover word: %s", word)
 
 	// Look up the symbol
 	symbol := doc.SymbolTable.Lookup(word)

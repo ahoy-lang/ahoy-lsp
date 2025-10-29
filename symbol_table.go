@@ -3,20 +3,19 @@ package main
 import (
 	"strings"
 
-	"github.com/ahoy-lang/ahoy"
+	"ahoy"
 )
 
 // Symbol represents a symbol in the code (variable, function, type, etc.)
 type Symbol struct {
-	Name       string
-	Kind       SymbolKind
-	Type       string
-	Line       int
-	Column     int
-	EndLine    int
-	EndColumn  int
-	Scope      *Scope
-	Definition *ahoy.ASTNode
+	Name      string
+	Kind      SymbolKind
+	Type      string
+	Line      int
+	Column    int
+	EndLine   int
+	EndColumn int
+	// Don't store Definition node or Scope to prevent memory leaks - AST can't be GC'd
 }
 
 type SymbolKind int
@@ -50,7 +49,7 @@ func NewScope(parent *Scope) *Scope {
 
 func (s *Scope) AddSymbol(symbol *Symbol) {
 	s.Symbols[symbol.Name] = symbol
-	symbol.Scope = s
+	// Don't set symbol.Scope to avoid circular references
 }
 
 func (s *Scope) Lookup(name string) *Symbol {
@@ -83,6 +82,34 @@ func NewSymbolTable() *SymbolTable {
 	}
 }
 
+// Clear breaks circular references to help garbage collection
+func (st *SymbolTable) Clear() {
+	if st.GlobalScope != nil {
+		st.clearScope(st.GlobalScope)
+	}
+	st.GlobalScope = nil
+	st.CurrentScope = nil
+}
+
+func (st *SymbolTable) clearScope(scope *Scope) {
+	if scope == nil {
+		return
+	}
+
+	// Clear symbols map
+	for k := range scope.Symbols {
+		delete(scope.Symbols, k)
+	}
+	scope.Symbols = nil
+
+	// Recursively clear children
+	for _, child := range scope.Children {
+		st.clearScope(child)
+	}
+	scope.Children = nil
+	scope.Parent = nil
+}
+
 func (st *SymbolTable) EnterScope() {
 	newScope := NewScope(st.CurrentScope)
 	st.CurrentScope.Children = append(st.CurrentScope.Children, newScope)
@@ -108,6 +135,10 @@ func (st *SymbolTable) FindSymbolAtPosition(line, column int) *Symbol {
 }
 
 func (st *SymbolTable) findSymbolInScope(scope *Scope, line, column int) *Symbol {
+	if scope == nil {
+		return nil
+	}
+
 	// Check symbols in current scope
 	for _, sym := range scope.Symbols {
 		if sym.Line == line && sym.Column <= column && column < sym.Column+len(sym.Name) {
@@ -115,9 +146,9 @@ func (st *SymbolTable) findSymbolInScope(scope *Scope, line, column int) *Symbol
 		}
 	}
 
-	// Check child scopes
+	// Check child scopes (limit depth to prevent stack overflow)
 	for _, child := range scope.Children {
-		if line >= child.StartLine && line <= child.EndLine {
+		if child != nil && line >= child.StartLine && line <= child.EndLine {
 			if sym := st.findSymbolInScope(child, line, column); sym != nil {
 				return sym
 			}
@@ -143,22 +174,33 @@ func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
 		return
 	}
 
+	// Prevent excessive recursion depth to avoid stack overflow and memory issues
+	if depth > 1000 {
+		debugLog.Printf("WARNING: Maximum recursion depth reached at depth %d", depth)
+		return
+	}
+
+	// Prevent cycles - check if we have too many children
+	if len(node.Children) > 1000 {
+		debugLog.Printf("WARNING: Node has too many children: %d", len(node.Children))
+		return
+	}
+
 	switch node.Type {
 	case ahoy.NODE_PROGRAM:
 		for _, child := range node.Children {
-			st.walkNode(child, depth)
+			st.walkNode(child, depth+1)
 		}
 
 	case ahoy.NODE_FUNCTION:
 		// Add function to symbol table
 		funcName := node.Value
 		symbol := &Symbol{
-			Name:       funcName,
-			Kind:       SymbolKindFunction,
-			Type:       node.DataType,
-			Line:       node.Line,
-			Column:     0,
-			Definition: node,
+			Name:   funcName,
+			Kind:   SymbolKindFunction,
+			Type:   node.DataType,
+			Line:   node.Line,
+			Column: 0,
 		}
 		st.AddSymbol(symbol)
 
@@ -208,12 +250,11 @@ func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
 		}
 
 		symbol := &Symbol{
-			Name:       varName,
-			Kind:       SymbolKindVariable,
-			Type:       varType,
-			Line:       node.Line,
-			Column:     0,
-			Definition: node,
+			Name:   varName,
+			Kind:   SymbolKindVariable,
+			Type:   varType,
+			Line:   node.Line,
+			Column: 0,
 		}
 		st.AddSymbol(symbol)
 
@@ -225,12 +266,11 @@ func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
 	case ahoy.NODE_ENUM_DECLARATION:
 		enumName := node.Value
 		symbol := &Symbol{
-			Name:       enumName,
-			Kind:       SymbolKindEnum,
-			Type:       "enum",
-			Line:       node.Line,
-			Column:     0,
-			Definition: node,
+			Name:   enumName,
+			Kind:   SymbolKindEnum,
+			Type:   "enum",
+			Line:   node.Line,
+			Column: 0,
 		}
 		st.AddSymbol(symbol)
 
@@ -251,12 +291,11 @@ func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
 	case ahoy.NODE_STRUCT_DECLARATION:
 		structName := node.Value
 		symbol := &Symbol{
-			Name:       structName,
-			Kind:       SymbolKindStruct,
-			Type:       "struct",
-			Line:       node.Line,
-			Column:     0,
-			Definition: node,
+			Name:   structName,
+			Kind:   SymbolKindStruct,
+			Type:   "struct",
+			Line:   node.Line,
+			Column: 0,
 		}
 		st.AddSymbol(symbol)
 
@@ -289,12 +328,11 @@ func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
 		}
 
 		symbol := &Symbol{
-			Name:       constName,
-			Kind:       SymbolKindConstant,
-			Type:       constType,
-			Line:       node.Line,
-			Column:     0,
-			Definition: node,
+			Name:   constName,
+			Kind:   SymbolKindConstant,
+			Type:   constType,
+			Line:   node.Line,
+			Column: 0,
 		}
 		st.AddSymbol(symbol)
 
@@ -383,8 +421,21 @@ func (st *SymbolTable) GetAllSymbols() []*Symbol {
 }
 
 func (st *SymbolTable) collectSymbols(scope *Scope, symbols *[]*Symbol) {
+	if scope == nil {
+		return
+	}
+
+	// Prevent memory exhaustion from too many symbols
+	if len(*symbols) > 1000 {
+		return
+	}
+
 	for _, sym := range scope.Symbols {
 		*symbols = append(*symbols, sym)
+		// Early exit if we have enough symbols
+		if len(*symbols) > 1000 {
+			return
+		}
 	}
 	for _, child := range scope.Children {
 		st.collectSymbols(child, symbols)
@@ -394,7 +445,7 @@ func (st *SymbolTable) collectSymbols(scope *Scope, symbols *[]*Symbol) {
 // FindReferences finds all references to a symbol
 func (st *SymbolTable) FindReferences(symbolName string, ast *ahoy.ASTNode) []Position {
 	positions := []Position{}
-	st.findReferencesInNode(ast, symbolName, &positions)
+	st.findReferencesInNode(ast, symbolName, &positions, 0)
 	return positions
 }
 
@@ -403,8 +454,18 @@ type Position struct {
 	Column int
 }
 
-func (st *SymbolTable) findReferencesInNode(node *ahoy.ASTNode, name string, positions *[]Position) {
+func (st *SymbolTable) findReferencesInNode(node *ahoy.ASTNode, name string, positions *[]Position, depth int) {
 	if node == nil {
+		return
+	}
+
+	// Prevent unbounded recursion and memory issues
+	if depth > 500 {
+		return
+	}
+
+	// Limit number of results to prevent memory exhaustion
+	if len(*positions) > 100 {
 		return
 	}
 
@@ -413,9 +474,18 @@ func (st *SymbolTable) findReferencesInNode(node *ahoy.ASTNode, name string, pos
 			Line:   node.Line,
 			Column: 0,
 		})
+		// Early exit if we have enough references
+		if len(*positions) > 100 {
+			return
+		}
+	}
+
+	// Limit child iteration
+	if len(node.Children) > 1000 {
+		return
 	}
 
 	for _, child := range node.Children {
-		st.findReferencesInNode(child, name, positions)
+		st.findReferencesInNode(child, name, positions, depth+1)
 	}
 }

@@ -5,42 +5,107 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
-	"github.com/ahoy-lang/ahoy"
+	"ahoy"
 
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 )
 
 func (s *Server) handleCodeAction(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
-	var params protocol.CodeActionParams
-	if err := json.Unmarshal(req.Params(), &params); err != nil {
-		return reply(ctx, nil, err)
+	// Add timeout to prevent hanging
+	timeoutCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+
+	// Use channel to handle timeout
+	done := make(chan struct{})
+	var result []protocol.CodeAction
+	var handleErr error
+
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				debugLog.Printf("PANIC in handleCodeAction: %v", r)
+				handleErr = fmt.Errorf("code action panic: %v", r)
+			}
+			close(done)
+		}()
+
+		var params protocol.CodeActionParams
+		if err := json.Unmarshal(req.Params(), &params); err != nil {
+			handleErr = err
+			return
+		}
+
+		doc := s.getDocument(params.TextDocument.URI)
+		if doc == nil {
+			result = []protocol.CodeAction{}
+			return
+		}
+
+		// Quick validation
+		if doc.SymbolTable == nil || doc.Content == "" {
+			result = []protocol.CodeAction{}
+			return
+		}
+
+		actions := []protocol.CodeAction{}
+
+		// Limit number of diagnostics processed to prevent timeouts
+		maxDiagnostics := 5
+		diagCount := 0
+
+		// Get diagnostics in the range
+		for _, diagnostic := range params.Context.Diagnostics {
+			if diagCount >= maxDiagnostics {
+				break
+			}
+			diagCount++
+
+			// Generate fixes based on the error message (with limits)
+			fixes := generateQuickFixes(doc, diagnostic)
+			actions = append(actions, fixes...)
+
+			// Limit total actions to prevent memory issues
+			if len(actions) >= 10 {
+				break
+			}
+		}
+
+		// Add general code actions based on context (only if not too many already)
+		if len(actions) < 8 {
+			contextActions := generateContextActions(doc, params.Range)
+			actions = append(actions, contextActions...)
+		}
+
+		// Final limit on actions
+		if len(actions) > 15 {
+			actions = actions[:15]
+		}
+
+		result = actions
+	}()
+
+	select {
+	case <-timeoutCtx.Done():
+		debugLog.Printf("Code action request timed out")
+		return reply(ctx, []protocol.CodeAction{}, nil)
+	case <-done:
+		if handleErr != nil {
+			return reply(ctx, []protocol.CodeAction{}, nil)
+		}
+		return reply(ctx, result, nil)
 	}
-
-	doc := s.getDocument(params.TextDocument.URI)
-	if doc == nil {
-		return reply(ctx, nil, nil)
-	}
-
-	actions := []protocol.CodeAction{}
-
-	// Get diagnostics in the range
-	for _, diagnostic := range params.Context.Diagnostics {
-		// Generate fixes based on the error message
-		fixes := generateQuickFixes(doc, diagnostic)
-		actions = append(actions, fixes...)
-	}
-
-	// Add general code actions based on context
-	contextActions := generateContextActions(doc, params.Range)
-	actions = append(actions, contextActions...)
-
-	return reply(ctx, actions, nil)
 }
 
 func generateQuickFixes(doc *Document, diagnostic protocol.Diagnostic) []protocol.CodeAction {
 	actions := []protocol.CodeAction{}
+
+	// Safety check
+	if doc == nil || doc.SymbolTable == nil {
+		return actions
+	}
 
 	message := diagnostic.Message
 
@@ -139,34 +204,37 @@ func generateQuickFixes(doc *Document, diagnostic protocol.Diagnostic) []protoco
 		actions = append(actions, action)
 	}
 
-	// Suggest replacing common mistakes
-	if strings.Contains(message, "undefined") {
-		// Extract variable name from message
-		parts := strings.Split(message, "'")
-		if len(parts) >= 2 {
-			undefinedName := parts[1]
-			// Suggest similar variable names
-			suggestions := findSimilarNames(doc.SymbolTable, undefinedName)
-			for _, suggestion := range suggestions {
-				action := protocol.CodeAction{
-					Title: fmt.Sprintf("Did you mean '%s'?", suggestion),
-					Kind:  protocol.QuickFix,
-					Edit: &protocol.WorkspaceEdit{
-						Changes: map[protocol.DocumentURI][]protocol.TextEdit{
-							doc.URI: {
-								{
-									Range:   diagnostic.Range,
-									NewText: suggestion,
+	// Suggest replacing common mistakes (disabled for now to prevent hangs)
+	// This feature was causing performance issues
+	/*
+		if strings.Contains(message, "undefined") {
+			// Extract variable name from message
+			parts := strings.Split(message, "'")
+			if len(parts) >= 2 {
+				undefinedName := parts[1]
+				// Suggest similar variable names
+				suggestions := findSimilarNames(doc.SymbolTable, undefinedName)
+				for _, suggestion := range suggestions {
+					action := protocol.CodeAction{
+						Title: fmt.Sprintf("Did you mean '%s'?", suggestion),
+						Kind:  protocol.QuickFix,
+						Edit: &protocol.WorkspaceEdit{
+							Changes: map[protocol.DocumentURI][]protocol.TextEdit{
+								doc.URI: {
+									{
+										Range:   diagnostic.Range,
+										NewText: suggestion,
+									},
 								},
 							},
 						},
-					},
-					Diagnostics: []protocol.Diagnostic{diagnostic},
+						Diagnostics: []protocol.Diagnostic{diagnostic},
+					}
+					actions = append(actions, action)
 				}
-				actions = append(actions, action)
 			}
 		}
-	}
+	*/
 
 	return actions
 }
@@ -174,13 +242,27 @@ func generateQuickFixes(doc *Document, diagnostic protocol.Diagnostic) []protoco
 func generateContextActions(doc *Document, rng protocol.Range) []protocol.CodeAction {
 	actions := []protocol.CodeAction{}
 
-	// Get the line content
-	lines := strings.Split(doc.Content, "\n")
-	if int(rng.Start.Line) >= len(lines) {
+	// Safety checks
+	if doc == nil || doc.Lines == nil {
 		return actions
 	}
 
-	line := lines[rng.Start.Line]
+	// Get the line content from cached lines
+	if int(rng.Start.Line) >= len(doc.Lines) || int(rng.Start.Line) < 0 {
+		return actions
+	}
+
+	line := doc.Lines[rng.Start.Line]
+	
+	// Sanity check line length to prevent issues
+	if len(line) > 10000 {
+		return actions
+	}
+
+	// Sanity check line length to prevent issues
+	if len(line) > 5000 {
+		return actions
+	}
 
 	// Extract function refactoring
 	if strings.Contains(line, "func ") {
@@ -332,18 +414,30 @@ func findSimilarNames(symbolTable *SymbolTable, name string) []string {
 	suggestions := []string{}
 	allSymbols := symbolTable.GetAllSymbols()
 
+	// Strict limit to prevent hanging
+	maxCheck := 50
+	checked := 0
+
 	for _, sym := range allSymbols {
+		if checked >= maxCheck {
+			break
+		}
+
+		if sym == nil {
+			continue
+		}
+
 		if sym.Kind == SymbolKindVariable || sym.Kind == SymbolKindFunction || sym.Kind == SymbolKindParameter {
+			checked++
 			// Calculate similarity (simple version)
 			if isSimilar(name, sym.Name) {
 				suggestions = append(suggestions, sym.Name)
+				// Stop early if we have enough
+				if len(suggestions) >= 2 {
+					break
+				}
 			}
 		}
-	}
-
-	// Limit to top 3 suggestions
-	if len(suggestions) > 3 {
-		suggestions = suggestions[:3]
 	}
 
 	return suggestions
