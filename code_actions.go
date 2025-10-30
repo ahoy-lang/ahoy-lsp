@@ -109,6 +109,15 @@ func generateQuickFixes(doc *Document, diagnostic protocol.Diagnostic) []protoco
 
 	message := diagnostic.Message
 
+	// Fix misplaced program declaration
+	if strings.Contains(message, "Program declaration must be on the first line") || 
+	   (diagnostic.Code == "program-position") {
+		action := createMoveProgramToTopAction(doc, diagnostic)
+		if action != nil {
+			actions = append(actions, *action)
+		}
+	}
+
 	// Fix missing 'do' keyword
 	if strings.Contains(message, "expected 'do'") || strings.Contains(message, "missing 'do'") {
 		action := protocol.CodeAction{
@@ -522,4 +531,86 @@ func nodeMatchesPattern(node *ahoy.ASTNode, pattern string) bool {
 	default:
 		return false
 	}
+}
+
+// createMoveProgramToTopAction creates a code action to move program declaration to line 1
+func createMoveProgramToTopAction(doc *Document, diagnostic protocol.Diagnostic) *protocol.CodeAction {
+	if doc.AST == nil {
+		return nil
+	}
+
+	// Find the program declaration node
+	var programNode *ahoy.ASTNode
+	var programText string
+	var findProgram func(*ahoy.ASTNode)
+	findProgram = func(node *ahoy.ASTNode) {
+		if node == nil {
+			return
+		}
+		if node.Type == ahoy.NODE_PROGRAM_DECLARATION {
+			programNode = node
+			return
+		}
+		for _, child := range node.Children {
+			if programNode == nil {
+				findProgram(child)
+			}
+		}
+	}
+	findProgram(doc.AST)
+
+	if programNode == nil {
+		return nil
+	}
+
+	// Get the program declaration text from the document
+	if programNode.Line > 0 && programNode.Line <= len(doc.Lines) {
+		programText = strings.TrimSpace(doc.Lines[programNode.Line-1])
+	}
+
+	if programText == "" {
+		return nil
+	}
+
+	// Create text edits to:
+	// 1. Remove program declaration from its current location
+	// 2. Add it to the top of the file
+
+	edits := []protocol.TextEdit{
+		// Remove from current location
+		{
+			Range: protocol.Range{
+				Start: protocol.Position{
+					Line:      uint32(programNode.Line - 1),
+					Character: 0,
+				},
+				End: protocol.Position{
+					Line:      uint32(programNode.Line), // Include the newline
+					Character: 0,
+				},
+			},
+			NewText: "",
+		},
+		// Add to top of file
+		{
+			Range: protocol.Range{
+				Start: protocol.Position{Line: 0, Character: 0},
+				End:   protocol.Position{Line: 0, Character: 0},
+			},
+			NewText: programText + "\n\n",
+		},
+	}
+
+	action := &protocol.CodeAction{
+		Title:       "Move program declaration to top of file",
+		Kind:        protocol.QuickFix,
+		Diagnostics: []protocol.Diagnostic{diagnostic},
+		Edit: &protocol.WorkspaceEdit{
+			Changes: map[protocol.DocumentURI][]protocol.TextEdit{
+				doc.URI: edits,
+			},
+		},
+	}
+
+	return action
 }

@@ -56,7 +56,7 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 		"func", "return",
 		"switch", "on",
 		"when",
-		"import",
+		"import", "program",
 		"ahoy",
 		"is", "not", "and", "or",
 		"break", "skip",

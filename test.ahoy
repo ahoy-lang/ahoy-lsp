@@ -1,26 +1,25 @@
-? Test file for Ahoy LSP
+program main
+import "raylib.h"
 ? This file intentionally has both valid and invalid syntax for testing
 
 ? Valid function
-greet :: |name:string| string:
-	ahoy |"Hello, "|
+greet :: | name:string | string:
+	ahoy|"Hello, "|
+	ahoy|"Hello, "|
 
-? Invalid function - missing 'do'
-func do
-    ahoy "This should show an error"
-end
+greet2 :: | name:string | string:
+	ahoy|"Hello,"|
+
+? Invalid function - missinising 'do'
 
 ? Valid loop
-loop i:1 to 10 do
-    ahoy i
-end
+loop i from 1 to 10 do
+    ahoy|i|
 
 
 ? Valid if statement
 x: 42
-if x is 42 then
-    ahoy "The answer!"
-end
+if x is 42 do ahoy |"The answer!"|
 
 ? Variables for autocomplete testing
 my_variable: 100
@@ -30,25 +29,29 @@ test_bool: true
 ? Invalid syntax - missing assignment operator
 bad_variable "this is wrong"
 
-? Valid switch
-color: "red"
-switch color on
-    "red" do ahoy|"Red color"|
-    "blue" do ahoy|"Blue color"|
-else ahoy "Unknown color"
 
+
+possible_color: "red"
+switch possible_color on
+  "red" : ahoy|"Red color"|
+  "blue" : ahoy|"Blue color"|
+	default: ahoy |"Unknown color"|
+
+
+struct point:
+	x:float
+	time:int
+	type smoke_particle:
+		y: int
 ? Enum declaration
-status enum:
-    PENDING
-    ACTIVE
-    COMPLETE
-end
 
-? Struct declaration
-Point struct:
-    x int
-    y int
-end
+status enum:
+	PENDING
+  ACTIVE
+  COMPLETE
+
+lkjlkj::|test:string| :
+	print|"This is a test"|
 
 ? Test operators
 result: 5 plus 3
