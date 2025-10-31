@@ -15,7 +15,15 @@ type Symbol struct {
 	Column    int
 	EndLine   int
 	EndColumn int
+	Fields    map[string]*StructField // For struct types, stores fields and nested types
 	// Don't store Definition node or Scope to prevent memory leaks - AST can't be GC'd
+}
+
+// StructField represents a field in a struct (can be a regular field or nested type)
+type StructField struct {
+	Name   string
+	Type   string
+	Fields map[string]*StructField // For nested types
 }
 
 type SymbolKind int
@@ -296,28 +304,55 @@ func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
 			Type:   "struct",
 			Line:   node.Line,
 			Column: 0,
+			Fields: make(map[string]*StructField),
 		}
-		st.AddSymbol(symbol)
 
-		// Add struct fields
-		for i := 0; i < len(node.Children); i += 2 {
-			if i < len(node.Children) {
-				fieldName := node.Children[i].Value
-				fieldType := ""
-				if i+1 < len(node.Children) {
-					fieldType = node.Children[i+1].Value
+		// Parse struct fields
+		for _, child := range node.Children {
+			if child.Type == ahoy.NODE_IDENTIFIER {
+				// Regular field
+				fieldName := child.Value
+				fieldType := child.DataType
+				symbol.Fields[fieldName] = &StructField{
+					Name: fieldName,
+					Type: fieldType,
+				}
+			} else if child.Type == ahoy.NODE_TYPE {
+				// Nested type (e.g., "type smoke_particle:")
+				typeName := child.Value
+				nestedField := &StructField{
+					Name:   typeName,
+					Type:   structName + "." + typeName, // Full type name
+					Fields: make(map[string]*StructField),
 				}
 
-				fieldSymbol := &Symbol{
-					Name:   fieldName,
-					Kind:   SymbolKindStructField,
-					Type:   fieldType,
-					Line:   node.Children[i].Line,
+				// Add fields from nested type
+				for _, nestedChild := range child.Children {
+					if nestedChild.Type == ahoy.NODE_IDENTIFIER {
+						nestedField.Fields[nestedChild.Value] = &StructField{
+							Name: nestedChild.Value,
+							Type: nestedChild.DataType,
+						}
+					}
+				}
+
+				// Store the nested type as a field
+				symbol.Fields[typeName] = nestedField
+
+				// Also create a separate symbol for the nested type
+				nestedSymbol := &Symbol{
+					Name:   structName + "." + typeName,
+					Kind:   SymbolKindStruct,
+					Type:   "struct",
+					Line:   child.Line,
 					Column: 0,
+					Fields: nestedField.Fields,
 				}
-				st.AddSymbol(fieldSymbol)
+				st.AddSymbol(nestedSymbol)
 			}
 		}
+
+		st.AddSymbol(symbol)
 
 	case ahoy.NODE_CONSTANT_DECLARATION:
 		constName := node.Value
@@ -397,6 +432,10 @@ func (st *SymbolTable) inferType(node *ahoy.ASTNode) string {
 	case ahoy.NODE_ARRAY_LITERAL:
 		return "array"
 	case ahoy.NODE_DICT_LITERAL:
+		// Check if this is a struct initialization by looking for type annotation
+		if node.DataType != "" {
+			return node.DataType
+		}
 		return "dict"
 	case ahoy.NODE_IDENTIFIER:
 		// Look up the identifier
@@ -411,6 +450,53 @@ func (st *SymbolTable) inferType(node *ahoy.ASTNode) string {
 	}
 
 	return ""
+}
+
+func (st *SymbolTable) GetStructFields(typeName string) map[string]*StructField {
+	// Look up the struct type
+	sym := st.Lookup(typeName)
+	if sym == nil || sym.Kind != SymbolKindStruct {
+		return nil
+	}
+
+	// Return all fields from this struct and its parent
+	allFields := make(map[string]*StructField)
+
+	// Check if this is a nested type (contains a dot)
+	if strings.Contains(typeName, ".") {
+		// e.g., "particle.smoke_particle"
+		parts := strings.Split(typeName, ".")
+		if len(parts) == 2 {
+			parentName := parts[0]
+			childName := parts[1]
+
+			// Get parent struct fields
+			parentSym := st.Lookup(parentName)
+			if parentSym != nil && parentSym.Kind == SymbolKindStruct {
+				// Add parent fields
+				for name, field := range parentSym.Fields {
+					// Skip nested type declarations
+					if !strings.Contains(field.Type, ".") {
+						allFields[name] = field
+					}
+				}
+			}
+
+			// Get child type fields
+			if childField, exists := parentSym.Fields[childName]; exists {
+				for name, field := range childField.Fields {
+					allFields[name] = field
+				}
+			}
+		}
+	} else {
+		// Regular struct, return all fields
+		for name, field := range sym.Fields {
+			allFields[name] = field
+		}
+	}
+
+	return allFields
 }
 
 // GetAllSymbols returns all symbols in the table (for outline/symbol list)
