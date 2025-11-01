@@ -24,6 +24,14 @@ func (s *Server) publishDiagnostics(ctx context.Context, doc *Document) {
 			constDiags := checkConstReassignment(doc)
 			diagnostics = append(diagnostics, constDiags...)
 
+			// Check const method calls
+			constMethodDiags := checkConstMethodCalls(doc)
+			diagnostics = append(diagnostics, constMethodDiags...)
+
+			// Check invalid method calls
+			invalidMethodDiags := checkInvalidMethodCalls(doc)
+			diagnostics = append(diagnostics, invalidMethodDiags...)
+
 			// Check return type violations
 			returnDiags := checkReturnTypeViolations(doc)
 			diagnostics = append(diagnostics, returnDiags...)
@@ -32,9 +40,17 @@ func (s *Server) publishDiagnostics(ctx context.Context, doc *Document) {
 			enumDiags := checkEnumDuplicates(doc)
 			diagnostics = append(diagnostics, enumDiags...)
 
+			// Check enum name duplicates
+			enumNameDiags := checkEnumNameDuplicates(doc)
+			diagnostics = append(diagnostics, enumNameDiags...)
+
 			// Check undefined function calls
 			undefinedFuncDiags := checkUndefinedFunctions(doc)
 			diagnostics = append(diagnostics, undefinedFuncDiags...)
+
+			// Check undeclared identifiers (variables, constants, enums)
+			undeclaredDiags := checkUndeclaredIdentifiers(doc)
+			diagnostics = append(diagnostics, undeclaredDiags...)
 
 			// Check function call argument counts
 			argCountDiags := checkFunctionCallArgumentCounts(doc)
@@ -288,6 +304,233 @@ func checkConstReassignment(doc *Document) []protocol.Diagnostic {
 						Source:   "ahoy",
 						Message:  "Cannot redeclare constant '" + constName + "'",
 						Code:     "const-redeclaration",
+					}
+					diagnostics = append(diagnostics, diagnostic)
+				}
+			}
+		}
+
+		// Recursively check children
+		for _, child := range node.Children {
+			checkNode(child)
+		}
+	}
+
+	checkNode(doc.AST)
+	return diagnostics
+}
+
+// checkConstMethodCalls checks for method calls on constants
+func checkConstMethodCalls(doc *Document) []protocol.Diagnostic {
+	diagnostics := []protocol.Diagnostic{}
+
+	if doc.AST == nil || doc.SymbolTable == nil {
+		return diagnostics
+	}
+
+	// Walk the AST looking for method calls and member accesses
+	var checkNode func(*ahoy.ASTNode)
+	checkNode = func(node *ahoy.ASTNode) {
+		if node == nil {
+			return
+		}
+
+		switch node.Type {
+		case ahoy.NODE_METHOD_CALL, ahoy.NODE_MEMBER_ACCESS:
+			// Check if the target of the method/member access is a constant
+			// The first child should be the target (identifier)
+			if len(node.Children) > 0 {
+				target := node.Children[0]
+				if target != nil && target.Type == ahoy.NODE_IDENTIFIER {
+					varName := target.Value
+					// Look up the symbol
+					sym := doc.SymbolTable.GlobalScope.Lookup(varName)
+					if sym != nil && sym.Kind == SymbolKindConstant {
+						// Error: trying to call method on constant
+						lineText := ""
+						if node.Line > 0 && node.Line <= len(doc.Lines) {
+							lineText = doc.Lines[node.Line-1]
+						}
+						endChar := uint32(len(lineText))
+						if endChar == 0 {
+							endChar = uint32(len(varName) + 20)
+						}
+
+						diagnostic := protocol.Diagnostic{
+							Range: protocol.Range{
+								Start: protocol.Position{
+									Line:      uint32(node.Line - 1),
+									Character: 0,
+								},
+								End: protocol.Position{
+									Line:      uint32(node.Line - 1),
+									Character: endChar,
+								},
+							},
+							Severity: protocol.DiagnosticSeverityError,
+							Source:   "ahoy",
+							Message:  "Cannot call methods on constant '" + varName + "'",
+							Code:     "const-method-call",
+						}
+						diagnostics = append(diagnostics, diagnostic)
+					}
+				}
+			}
+		}
+
+		// Recursively check children
+		for _, child := range node.Children {
+			checkNode(child)
+		}
+	}
+
+	checkNode(doc.AST)
+	return diagnostics
+}
+
+// getValidStringMethods returns list of valid string methods
+func getValidStringMethods() []string {
+	return []string{
+		"length", "upper", "lower", "replace", "contains",
+		"camel_case", "snake_case", "pascal_case", "kebab_case",
+		"match", "split", "count", "lpad", "rpad", "pad", "strip", "get_file",
+	}
+}
+
+// getValidArrayMethods returns list of valid array methods
+func getValidArrayMethods() []string {
+	return []string{
+		"length", "push", "pop", "sort", "reverse", "contains",
+		"find", "filter", "map", "join", "slice",
+	}
+}
+
+// getValidDictMethods returns list of valid dict methods
+func getValidDictMethods() []string {
+	return []string{
+		"size", "clear", "has", "has_all", "keys", "values",
+		"sort", "stable_sort", "merge",
+	}
+}
+
+// checkInvalidMethodCalls checks for calls to non-existent methods on strings, arrays, and dicts
+func checkInvalidMethodCalls(doc *Document) []protocol.Diagnostic {
+	diagnostics := []protocol.Diagnostic{}
+
+	if doc.AST == nil || doc.SymbolTable == nil {
+		return diagnostics
+	}
+
+	// Walk the AST looking for method calls
+	var checkNode func(*ahoy.ASTNode)
+	checkNode = func(node *ahoy.ASTNode) {
+		if node == nil {
+			return
+		}
+
+		if node.Type == ahoy.NODE_METHOD_CALL {
+			// Get the method name from the node value
+			methodName := node.Value
+
+			// Get the target (first child should be the object)
+			if len(node.Children) > 0 {
+				target := node.Children[0]
+				
+				// Determine the type of the target
+				var targetType string
+				if target != nil {
+					if target.Type == ahoy.NODE_IDENTIFIER {
+						// Look up the symbol to get its type
+						sym := doc.SymbolTable.GlobalScope.Lookup(target.Value)
+						if sym != nil {
+							targetType = sym.Type
+						}
+					} else if target.Type == ahoy.NODE_STRING {
+						targetType = "string"
+					} else if target.Type == ahoy.NODE_ARRAY_LITERAL {
+						targetType = "array"
+					} else if target.Type == ahoy.NODE_DICT_LITERAL {
+						targetType = "dict"
+					}
+				}
+
+				// Check if method exists for the type
+				var validMethods []string
+				switch targetType {
+				case "string":
+					validMethods = getValidStringMethods()
+				case "array":
+					validMethods = getValidArrayMethods()
+				case "dict":
+					validMethods = getValidDictMethods()
+				default:
+					// Unknown type, skip validation
+					for _, child := range node.Children {
+						checkNode(child)
+					}
+					return
+				}
+
+				// Check if method is valid
+				methodExists := false
+				for _, validMethod := range validMethods {
+					if validMethod == methodName {
+						methodExists = true
+						break
+					}
+				}
+
+				if !methodExists {
+					// Method doesn't exist - find similar method using Levenshtein distance
+					bestMatch := ""
+					bestDistance := 1000000
+					
+					for _, validMethod := range validMethods {
+						distance := levenshteinDistance(methodName, validMethod)
+						if distance < bestDistance {
+							bestDistance = distance
+							bestMatch = validMethod
+						}
+					}
+
+					// Build error message
+					message := "Method '" + methodName + "' does not exist"
+					
+					// Suggest similar method if distance is reasonable
+					// Threshold: max 3 edits or 40% of method name length
+					threshold := 3
+					if len(methodName) > 7 {
+						threshold = (len(methodName) * 2) / 5
+					}
+					
+					if bestDistance <= threshold && bestMatch != "" {
+						message += ", did you mean '" + bestMatch + "'?"
+					}
+
+					lineText := ""
+					if node.Line > 0 && node.Line <= len(doc.Lines) {
+						lineText = doc.Lines[node.Line-1]
+					}
+					endChar := uint32(len(lineText))
+					if endChar == 0 {
+						endChar = uint32(len(methodName) + 20)
+					}
+
+					diagnostic := protocol.Diagnostic{
+						Range: protocol.Range{
+							Start: protocol.Position{
+								Line:      uint32(node.Line - 1),
+								Character: 0,
+							},
+							End: protocol.Position{
+								Line:      uint32(node.Line - 1),
+								Character: endChar,
+							},
+						},
+						Severity: protocol.DiagnosticSeverityError,
+						Source:   "ahoy",
+						Message:  message,
+						Code:     "invalid-method",
 					}
 					diagnostics = append(diagnostics, diagnostic)
 				}
@@ -565,6 +808,78 @@ func checkEnumDuplicates(doc *Document) []protocol.Diagnostic {
 	return diagnostics
 }
 
+// checkEnumNameDuplicates checks for duplicate enum declarations
+func checkEnumNameDuplicates(doc *Document) []protocol.Diagnostic {
+	diagnostics := []protocol.Diagnostic{}
+
+	if doc.AST == nil {
+		return diagnostics
+	}
+
+	// Track enum names and their lines
+	enumMap := make(map[string][]int)
+
+	// Walk the AST looking for enum declarations
+	var checkNode func(*ahoy.ASTNode)
+	checkNode = func(node *ahoy.ASTNode) {
+		if node == nil {
+			return
+		}
+
+		if node.Type == ahoy.NODE_ENUM_DECLARATION {
+			enumName := node.Value
+			if enumName != "" {
+				enumMap[enumName] = append(enumMap[enumName], node.Line)
+			}
+		}
+
+		// Recursively check children
+		for _, child := range node.Children {
+			checkNode(child)
+		}
+	}
+
+	checkNode(doc.AST)
+
+	// Check for duplicate enum names
+	for enumName, lines := range enumMap {
+		if len(lines) > 1 {
+			// Report error for each duplicate occurrence (except the first)
+			for i := 1; i < len(lines); i++ {
+				line := lines[i]
+				lineText := ""
+				if line > 0 && line <= len(doc.Lines) {
+					lineText = doc.Lines[line-1]
+				}
+				endChar := uint32(len(lineText))
+				if endChar == 0 {
+					endChar = uint32(len(enumName) + 10)
+				}
+
+				diagnostic := protocol.Diagnostic{
+					Range: protocol.Range{
+						Start: protocol.Position{
+							Line:      uint32(line - 1),
+							Character: 0,
+						},
+						End: protocol.Position{
+							Line:      uint32(line - 1),
+							Character: endChar,
+						},
+					},
+					Severity: protocol.DiagnosticSeverityError,
+					Source:   "ahoy",
+					Message:  "Enum '" + enumName + "' declared twice",
+					Code:     "enum-duplicate-declaration",
+				}
+				diagnostics = append(diagnostics, diagnostic)
+			}
+		}
+	}
+
+	return diagnostics
+}
+
 // levenshteinDistance calculates the edit distance between two strings
 func levenshteinDistance(s1, s2 string) int {
 	if len(s1) == 0 {
@@ -728,6 +1043,127 @@ func checkUndefinedFunctions(doc *Document) []protocol.Diagnostic {
 		}
 
 		// Recursively check children
+		for _, child := range node.Children {
+			checkNode(child)
+		}
+	}
+
+	checkNode(doc.AST)
+	return diagnostics
+}
+
+// checkUndeclaredIdentifiers checks for use of undeclared variables, constants, and enums
+func checkUndeclaredIdentifiers(doc *Document) []protocol.Diagnostic {
+	diagnostics := []protocol.Diagnostic{}
+
+	if doc.AST == nil || doc.SymbolTable == nil {
+		return diagnostics
+	}
+
+	// Walk the AST looking for identifier usage
+	var checkNode func(*ahoy.ASTNode)
+	checkNode = func(node *ahoy.ASTNode) {
+		if node == nil {
+			return
+		}
+
+		// Check identifiers in various contexts
+		switch node.Type {
+		case ahoy.NODE_IDENTIFIER:
+			// Skip if this is part of a declaration (left side of assignment)
+			// or function/enum/struct declaration
+			// We only want to check usage, not declarations
+			
+			identifierName := node.Value
+			
+			// Look up the identifier in symbol table
+			sym := doc.SymbolTable.GlobalScope.Lookup(identifierName)
+			
+			if sym == nil {
+				// Identifier not found - determine what type it likely is
+				identifierType := "variable"
+				
+				// Check naming convention to guess type
+				// Constants are typically ALL_CAPS
+				isAllCaps := true
+				for _, ch := range identifierName {
+					if ch >= 'a' && ch <= 'z' {
+						isAllCaps = false
+						break
+					}
+				}
+				
+				if isAllCaps && len(identifierName) > 1 {
+					identifierType = "constant"
+				}
+				
+				// Build error message
+				message := "Use of undeclared " + identifierType + " '" + identifierName + "'"
+				
+				lineText := ""
+				if node.Line > 0 && node.Line <= len(doc.Lines) {
+					lineText = doc.Lines[node.Line-1]
+				}
+				endChar := uint32(len(lineText))
+				if endChar == 0 {
+					endChar = uint32(len(identifierName) + 10)
+				}
+
+				diagnostic := protocol.Diagnostic{
+					Range: protocol.Range{
+						Start: protocol.Position{
+							Line:      uint32(node.Line - 1),
+							Character: 0,
+						},
+						End: protocol.Position{
+							Line:      uint32(node.Line - 1),
+							Character: endChar,
+						},
+					},
+					Severity: protocol.DiagnosticSeverityError,
+					Source:   "ahoy",
+					Message:  message,
+					Code:     "undeclared-identifier",
+				}
+				diagnostics = append(diagnostics, diagnostic)
+			}
+
+		case ahoy.NODE_ASSIGNMENT, ahoy.NODE_VARIABLE_DECLARATION:
+			// For assignments, check the right side (value) but not the left side (name)
+			// Skip the first child (variable name being declared)
+			for i := 1; i < len(node.Children); i++ {
+				checkNode(node.Children[i])
+			}
+			return // Don't recurse further
+
+		case ahoy.NODE_CONSTANT_DECLARATION:
+			// For const declarations, check the right side but not the name
+			for i := 1; i < len(node.Children); i++ {
+				checkNode(node.Children[i])
+			}
+			return // Don't recurse further
+
+		case ahoy.NODE_FUNCTION:
+			// Skip function name and parameters, only check body
+			if len(node.Children) > 1 {
+				checkNode(node.Children[1]) // Function body
+			}
+			return // Don't recurse further
+
+		case ahoy.NODE_ENUM_DECLARATION, ahoy.NODE_STRUCT_DECLARATION:
+			// Skip enum/struct declarations entirely
+			return
+
+		case ahoy.NODE_CALL:
+			// Function calls are handled by checkUndefinedFunctions
+			// But we still need to check the arguments
+			for _, child := range node.Children {
+				checkNode(child)
+			}
+			return
+		}
+
+		// Recursively check children for other node types
 		for _, child := range node.Children {
 			checkNode(child)
 		}

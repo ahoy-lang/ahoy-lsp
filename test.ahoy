@@ -2,20 +2,32 @@ program main
 import "raylib.h"
 ? This file intentionally has both valid and invalid syntax for testing
 
-? Valid function
-greet :: | name:string | string:
-	ahoy|"Hello, "|
-	ahoy|"Hello, "|
+? Invalid function - missinising 'do'
+test::"kjlkjlk"
+test::"kjklkjlk"
+test::"kjklkjlk"
+tkest::"kjklkjlk"
+tkest::"kjklkjlk"
+bob::"kjklkjlk"
+BOB::"kjl"
+tekk::[32]
+tekkst::9
+test:"kjklkjlk"
 
-greet2 :: | name:string | string:
+print|BOB|
+? Valid function
+greet :: | name:string |:
+	ahoy|f"Hello, {}"|
+
+greet2 :: |name:int|void:
 	ahoy|"Hello,"|
 
-? Invalid function - missinising 'do'
+
+if kjdklj.length|| > 10 then print |"kkdlfj"
 
 ? Valid loop
-loop i from 1 to 10 do
-    ahoy|i|
-
+loop i from: 1 to 10 do
+	ahoy|i|
 
 ? Valid if statement
 x: 42
@@ -31,11 +43,13 @@ bad_variable "this is wrong"
 
 
 
+
 possible_color: "red"
 switch possible_color on
   "red" : ahoy|"Red color"|
   "blue" : ahoy|"Blue color"|
-	default: ahoy |"Unknown color"|
+  "green" :ahoy|"jkljlk"|
+  _: ahoy |"Unknown color"|
 
 
 struct point:
@@ -45,13 +59,11 @@ struct point:
 		y: int
 ? Enum declaration
 
-status enum:
+enum status:
 	PENDING
-  ACTIVE
-  COMPLETE
+	ACTIVE
 
-lkjlkj::|test:string| :
-	print|"This is a test"|
+lkjlkj :: |test:string|: print|"This is a test"|
 
 ? Test operators
 result: 5 plus 3
@@ -73,3 +85,44 @@ person: {"name": "Alice", "age": 30}
 name_val: person["name"]
 
 ? This should trigger autocomplete when you type 'fu' or 'lo' or 'if'
+
+person: <name: "Alice", age: 30>? if we have struct with these explicit properties we infer the type to be person
+
+struct person:
+	name: string
+	age: int
+	type dwarf:
+		height:int
+
+
+person: <name: "Alice", age: 30, height: 12> ? would be inferred as person.dwarf type
+person: <name: "Alice", age: 30>
+print|f"{person.name}"|
+person.strip||
+
+
+
+
+print|f"{person.type}"|
+test_di:dict= {"name": "Alice", "age": 30}
+
+person: <name: "Alice", age: 30>
+dict_example:dict= {name: "Alice", age: 30}? if we have struct with these explicit properties we infer the type to be person
+person<'name'> : "bob"
+dict_example{"name"} : "charlene"
+
+numbers: [1, 2, 3, 4, 5]
+
+testk: "larry"
+
+
+first: numbers[0] ? typed int
+name:string= "larry" ? typed string
+name:string= 29 ? typed should throw linting error "expected string got int"
+
+age: 29 ? type inferred as int
+age:int= 29 ? explicitly typed as int
+age:string= "age" ? typed should throw linting error "expected int got string"
+age: 29 ? variable type inferred as int
+age:: 29 ? const type inferred as int
+name::string= 29 ? const type should throw linting error "expected string got int"
