@@ -9,7 +9,10 @@ import (
 	"runtime/debug"
 	"time"
 
+	"ahoy"
 	"go.lsp.dev/jsonrpc2"
+	"go.lsp.dev/protocol"
+	"go.lsp.dev/uri"
 )
 
 var debugLog *log.Logger
@@ -20,6 +23,16 @@ func init() {
 }
 
 func main() {
+	// Check for CLI validate mode
+	if len(os.Args) > 1 && os.Args[1] == "--validate" {
+		if len(os.Args) < 3 {
+			fmt.Fprintln(os.Stderr, "Usage: ahoy-lsp --validate <file.ahoy>")
+			os.Exit(1)
+		}
+		runValidate(os.Args[2])
+		return
+	}
+
 	debugLog.Println("Starting Ahoy Language Server")
 
 	// Set aggressive garbage collection to prevent memory buildup
@@ -60,6 +73,92 @@ func main() {
 	}
 
 	debugLog.Println("Shutting down cleanly")
+}
+
+func runValidate(filename string) {
+	// Read file
+	content, err := os.ReadFile(filename)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error reading file: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Import ahoy package
+	tokens := ahoy.Tokenize(string(content))
+	ast, parseErrors := ahoy.ParseLint(tokens)
+
+	// Check syntax errors
+	if len(parseErrors) > 0 {
+		fmt.Printf("Found %d syntax error(s) in %s:\n", len(parseErrors), filename)
+		for _, err := range parseErrors {
+			fmt.Printf("  Line %d, Column %d: %s\n", err.Line, err.Column, err.Message)
+		}
+		os.Exit(1)
+	}
+
+	if ast == nil {
+		fmt.Printf("✓ No errors found in %s\n", filename)
+		return
+	}
+
+	// Build symbol table
+	doc := &Document{
+		URI:     uri.URI("file://" + filename),
+		Content: string(content),
+		Lines:   splitLines(string(content)),
+		AST:     ast,
+	}
+	doc.SymbolTable = BuildSymbolTable(ast)
+
+	// Run diagnostic checks directly
+	allDiagnostics := []protocol.Diagnostic{}
+	
+	// Check undeclared identifiers
+	diagnostics := checkUndeclaredIdentifiers(doc)
+	allDiagnostics = append(allDiagnostics, diagnostics...)
+	
+	// Check const reassignment
+	constDiags := checkConstReassignment(doc)
+	allDiagnostics = append(allDiagnostics, constDiags...)
+	
+	// Check undefined functions
+	undefinedFuncDiags := checkUndefinedFunctions(doc)
+	allDiagnostics = append(allDiagnostics, undefinedFuncDiags...)
+	
+	// Filter for errors only
+	errorCount := 0
+	for _, diag := range allDiagnostics {
+		if diag.Severity == protocol.DiagnosticSeverityError {
+			if errorCount == 0 {
+				fmt.Printf("Found validation error(s) in %s:\n", filename)
+			}
+			fmt.Printf("  Line %d: %s\n", diag.Range.Start.Line+1, diag.Message)
+			errorCount++
+		}
+	}
+
+	if errorCount > 0 {
+		os.Exit(1)
+	}
+	
+	fmt.Printf("✓ No errors found in %s\n", filename)
+}
+
+func splitLines(content string) []string {
+	lines := []string{}
+	current := ""
+	for _, ch := range content {
+		if ch == '\n' {
+			lines = append(lines, current)
+			current = ""
+		} else {
+			current += string(ch)
+		}
+	}
+	if current != "" {
+		lines = append(lines, current)
+	}
+	return lines
 }
 
 // monitorMemory periodically logs memory usage and forces GC if needed

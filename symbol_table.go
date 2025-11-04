@@ -21,9 +21,10 @@ type Symbol struct {
 
 // StructField represents a field in a struct (can be a regular field or nested type)
 type StructField struct {
-	Name   string
-	Type   string
-	Fields map[string]*StructField // For nested types
+	Name         string
+	Type         string
+	Fields       map[string]*StructField // For nested types
+	DefaultValue string                  // String representation of default value
 }
 
 type SymbolKind int
@@ -219,20 +220,15 @@ func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
 		// Add parameters
 		if len(node.Children) > 0 {
 			params := node.Children[0]
-			if params != nil {
-				for i := 0; i < len(params.Children); i += 2 {
-					if i < len(params.Children) {
-						paramName := params.Children[i].Value
-						paramType := ""
-						if i+1 < len(params.Children) {
-							paramType = params.Children[i+1].Value
-						}
-
+			if params != nil && params.Type == ahoy.NODE_BLOCK {
+				// Each parameter is a NODE_IDENTIFIER with Value=name and DataType=type
+				for _, paramNode := range params.Children {
+					if paramNode.Type == ahoy.NODE_IDENTIFIER {
 						paramSymbol := &Symbol{
-							Name:   paramName,
+							Name:   paramNode.Value,
 							Kind:   SymbolKindParameter,
-							Type:   paramType,
-							Line:   params.Children[i].Line,
+							Type:   paramNode.DataType,
+							Line:   paramNode.Line,
 							Column: 0,
 						}
 						st.AddSymbol(paramSymbol)
@@ -243,7 +239,13 @@ func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
 
 		// Walk function body
 		if len(node.Children) > 1 {
-			st.walkNode(node.Children[1], depth+1)
+			bodyNode := node.Children[1]
+			st.walkNode(bodyNode, depth+1)
+			
+			// Try to set end line from body
+			if bodyNode != nil && bodyNode.Line > 0 {
+				st.CurrentScope.EndLine = findLastLine(bodyNode)
+			}
 		}
 
 		st.ExitScope()
@@ -264,11 +266,74 @@ func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
 			Line:   node.Line,
 			Column: 0,
 		}
+		
+		// Extract object literal properties if the value is an object literal
+		if len(node.Children) > 0 && node.Children[0].Type == ahoy.NODE_OBJECT_LITERAL {
+			symbol.Fields = st.extractObjectLiteralFields(node.Children[0])
+		}
+		
 		st.AddSymbol(symbol)
 
 		// Walk the value expression
 		if len(node.Children) > 0 {
 			st.walkNode(node.Children[0], depth+1)
+		}
+
+	case ahoy.NODE_TUPLE_ASSIGNMENT:
+		// Handle tuple assignments like: a, b: func|args|
+		// Children[0] = leftSide (block with identifiers)
+		// Children[1] = rightSide (block with function call or expressions)
+		if len(node.Children) >= 2 {
+			leftSide := node.Children[0]
+			rightSide := node.Children[1]
+			
+			// Always register the variables on the left side
+			// The parser will handle validation, so we just need to track them
+			for _, leftChild := range leftSide.Children {
+				if leftChild.Type == ahoy.NODE_IDENTIFIER {
+					varName := leftChild.Value
+					varType := "any" // Default type
+					
+					// Try to infer type from right side if it's a function call
+					if len(rightSide.Children) == 1 && rightSide.Children[0].Type == ahoy.NODE_CALL {
+						callNode := rightSide.Children[0]
+						funcName := callNode.Value
+						
+						// Look up function to get return types
+						funcSymbol := st.Lookup(funcName)
+						if funcSymbol != nil && funcSymbol.Type != "" && funcSymbol.Type != "void" {
+							// Parse return types from function signature
+							returnTypes := strings.Split(funcSymbol.Type, ",")
+							
+							// Find which position this variable is at
+							varIndex := -1
+							for i, child := range leftSide.Children {
+								if child == leftChild {
+									varIndex = i
+									break
+								}
+							}
+							
+							// Use the corresponding return type if available
+							if varIndex >= 0 && varIndex < len(returnTypes) {
+								varType = strings.TrimSpace(returnTypes[varIndex])
+							}
+						}
+					}
+					
+					symbol := &Symbol{
+						Name:   varName,
+						Kind:   SymbolKindVariable,
+						Type:   varType,
+						Line:   leftChild.Line,
+						Column: 0,
+					}
+					st.AddSymbol(symbol)
+				}
+			}
+			
+			// Walk right side to process the function call
+			st.walkNode(rightSide, depth+1)
 		}
 
 	case ahoy.NODE_ENUM_DECLARATION:
@@ -313,9 +378,14 @@ func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
 				// Regular field
 				fieldName := child.Value
 				fieldType := child.DataType
+				defaultVal := ""
+				if child.DefaultValue != nil {
+					defaultVal = formatDefaultValue(child.DefaultValue)
+				}
 				symbol.Fields[fieldName] = &StructField{
-					Name: fieldName,
-					Type: fieldType,
+					Name:         fieldName,
+					Type:         fieldType,
+					DefaultValue: defaultVal,
 				}
 			} else if child.Type == ahoy.NODE_TYPE {
 				// Nested type (e.g., "type smoke_particle:")
@@ -329,9 +399,14 @@ func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
 				// Add fields from nested type
 				for _, nestedChild := range child.Children {
 					if nestedChild.Type == ahoy.NODE_IDENTIFIER {
+						defaultVal := ""
+						if nestedChild.DefaultValue != nil {
+							defaultVal = formatDefaultValue(nestedChild.DefaultValue)
+						}
 						nestedField.Fields[nestedChild.Value] = &StructField{
-							Name: nestedChild.Value,
-							Type: nestedChild.DataType,
+							Name:         nestedChild.Value,
+							Type:         nestedChild.DataType,
+							DefaultValue: defaultVal,
 						}
 					}
 				}
@@ -340,15 +415,43 @@ func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
 				symbol.Fields[typeName] = nestedField
 
 				// Also create a separate symbol for the nested type
+				// First, copy parent struct's non-nested fields for inheritance
+				inheritedFields := make(map[string]*StructField)
+				for parentFieldName, parentField := range symbol.Fields {
+					if parentField.Fields == nil {
+						// Copy regular field from parent
+						inheritedFields[parentFieldName] = &StructField{
+							Name:         parentField.Name,
+							Type:         parentField.Type,
+							DefaultValue: parentField.DefaultValue,
+						}
+					}
+				}
+				// Add nested type's own fields
+				for nestedFieldName, nestedFieldObj := range nestedField.Fields {
+					inheritedFields[nestedFieldName] = nestedFieldObj
+				}
+				
 				nestedSymbol := &Symbol{
 					Name:   structName + "." + typeName,
 					Kind:   SymbolKindStruct,
 					Type:   "struct",
 					Line:   child.Line,
 					Column: 0,
-					Fields: nestedField.Fields,
+					Fields: inheritedFields,
 				}
 				st.AddSymbol(nestedSymbol)
+				
+				// ALSO add symbol with just the nested type name for easier lookup
+				nestedSymbolShort := &Symbol{
+					Name:   typeName,
+					Kind:   SymbolKindStruct,
+					Type:   "struct",
+					Line:   child.Line,
+					Column: 0,
+					Fields: inheritedFields,
+				}
+				st.AddSymbol(nestedSymbolShort)
 			}
 		}
 
@@ -378,15 +481,87 @@ func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
 		st.EnterScope()
 		st.CurrentScope.StartLine = node.Line
 
-		// For loops with variables
-		if node.Type == ahoy.NODE_FOR_IN_ARRAY_LOOP && len(node.Children) > 0 {
-			// Add loop variable
-			loopVar := node.Children[0]
-			if loopVar.Type == ahoy.NODE_IDENTIFIER {
+		// For loops with loop variables, add them to the scope
+		switch node.Type {
+		case ahoy.NODE_FOR_IN_ARRAY_LOOP:
+			// loop element in array
+			if len(node.Children) > 0 {
+				loopVar := node.Children[0]
+				if loopVar.Type == ahoy.NODE_IDENTIFIER {
+					symbol := &Symbol{
+						Name:   loopVar.Value,
+						Kind:   SymbolKindVariable,
+						Type:   "any", // Could be inferred from array type
+						Line:   loopVar.Line,
+						Column: 0,
+					}
+					st.AddSymbol(symbol)
+				}
+			}
+
+		case ahoy.NODE_FOR_IN_DICT_LOOP:
+			// loop key,value in dict
+			if len(node.Children) >= 2 {
+				keyVar := node.Children[0]
+				valueVar := node.Children[1]
+				if keyVar.Type == ahoy.NODE_IDENTIFIER {
+					symbol := &Symbol{
+						Name:   keyVar.Value,
+						Kind:   SymbolKindVariable,
+						Type:   "string",
+						Line:   keyVar.Line,
+						Column: 0,
+					}
+					st.AddSymbol(symbol)
+				}
+				if valueVar.Type == ahoy.NODE_IDENTIFIER {
+					symbol := &Symbol{
+						Name:   valueVar.Value,
+						Kind:   SymbolKindVariable,
+						Type:   "any",
+						Line:   valueVar.Line,
+						Column: 0,
+					}
+					st.AddSymbol(symbol)
+				}
+			}
+
+		case ahoy.NODE_FOR_RANGE_LOOP:
+			// loop i:start to end OR loop i to end
+			if len(node.Children) >= 4 && node.Children[0].Type == ahoy.NODE_IDENTIFIER {
+				loopVar := node.Children[0]
 				symbol := &Symbol{
 					Name:   loopVar.Value,
 					Kind:   SymbolKindVariable,
-					Type:   "any", // Could be inferred from array type
+					Type:   "int",
+					Line:   loopVar.Line,
+					Column: 0,
+				}
+				st.AddSymbol(symbol)
+			}
+
+		case ahoy.NODE_WHILE_LOOP:
+			// loop i:start till condition OR loop i till condition
+			if len(node.Children) >= 3 && node.Children[0].Type == ahoy.NODE_IDENTIFIER {
+				loopVar := node.Children[0]
+				symbol := &Symbol{
+					Name:   loopVar.Value,
+					Kind:   SymbolKindVariable,
+					Type:   "int",
+					Line:   loopVar.Line,
+					Column: 0,
+				}
+				st.AddSymbol(symbol)
+			}
+
+		case ahoy.NODE_FOR_COUNT_LOOP:
+			// loop i:start: OR loop i do
+			if len(node.Children) >= 2 && node.Children[0].Type == ahoy.NODE_IDENTIFIER {
+				loopVar := node.Children[0]
+				symbol := &Symbol{
+					Name:   loopVar.Value,
+					Kind:   SymbolKindVariable,
+					Type:   "int",
 					Line:   loopVar.Line,
 					Column: 0,
 				}
@@ -399,6 +574,8 @@ func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
 			st.walkNode(child, depth+1)
 		}
 
+		// Set the end line for this scope before exiting
+		st.CurrentScope.EndLine = findLastLine(node)
 		st.ExitScope()
 
 	case ahoy.NODE_BLOCK:
@@ -411,6 +588,44 @@ func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
 		for _, child := range node.Children {
 			st.walkNode(child, depth+1)
 		}
+	}
+}
+
+func formatDefaultValue(node *ahoy.ASTNode) string {
+	if node == nil {
+		return ""
+	}
+	
+	switch node.Type {
+	case ahoy.NODE_NUMBER:
+		return node.Value
+	case ahoy.NODE_STRING:
+		return `"` + node.Value + `"`
+	case ahoy.NODE_BOOLEAN:
+		return node.Value
+	case ahoy.NODE_OBJECT_LITERAL:
+		// Format object literal as string
+		if len(node.Children) == 2 && node.DataType == "vector2" {
+			// Simple vector2: <x,y>
+			return "<" + node.Children[0].Value + "," + node.Children[1].Value + ">"
+		}
+		// Full object literal
+		result := "<"
+		for i, prop := range node.Children {
+			if i > 0 {
+				result += ","
+			}
+			if prop.Type == ahoy.NODE_OBJECT_PROPERTY {
+				result += prop.Value + ":"
+				if len(prop.Children) > 0 {
+					result += formatDefaultValue(prop.Children[0])
+				}
+			}
+		}
+		result += ">"
+		return result
+	default:
+		return ""
 	}
 }
 
@@ -437,6 +652,17 @@ func (st *SymbolTable) inferType(node *ahoy.ASTNode) string {
 			return node.DataType
 		}
 		return "dict"
+	case ahoy.NODE_OBJECT_LITERAL:
+		// Check if it has a type (struct initialization) or explicit DataType
+		if node.Value != "" {
+			// Struct initialization: name : type<...>
+			return node.Value
+		}
+		if node.DataType == "vector2" {
+			return "vector2"
+		}
+		// Plain object literal
+		return "object"
 	case ahoy.NODE_IDENTIFIER:
 		// Look up the identifier
 		if sym := st.Lookup(node.Value); sym != nil {
@@ -574,4 +800,50 @@ func (st *SymbolTable) findReferencesInNode(node *ahoy.ASTNode, name string, pos
 	for _, child := range node.Children {
 		st.findReferencesInNode(child, name, positions, depth+1)
 	}
+}
+
+// extractObjectLiteralFields extracts properties from an object literal node
+func (st *SymbolTable) extractObjectLiteralFields(node *ahoy.ASTNode) map[string]*StructField {
+	if node == nil || node.Type != ahoy.NODE_OBJECT_LITERAL {
+		return nil
+	}
+
+	fields := make(map[string]*StructField)
+	
+	// Iterate through object properties
+	for _, prop := range node.Children {
+		if prop.Type == ahoy.NODE_OBJECT_PROPERTY {
+			fieldName := prop.Value
+			fieldType := ""
+			
+			// Try to infer type from the property value
+			if len(prop.Children) > 0 {
+				fieldType = st.inferType(prop.Children[0])
+			}
+			
+			fields[fieldName] = &StructField{
+				Name: fieldName,
+				Type: fieldType,
+			}
+		}
+	}
+	
+	return fields
+}
+
+// findLastLine recursively finds the highest line number in a node tree
+func findLastLine(node *ahoy.ASTNode) int {
+if node == nil {
+return 0
+}
+
+maxLine := node.Line
+for _, child := range node.Children {
+childLine := findLastLine(child)
+if childLine > maxLine {
+maxLine = childLine
+}
+}
+
+return maxLine
 }

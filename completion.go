@@ -174,10 +174,32 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 					return reply(ctx, protocol.CompletionList{IsIncomplete: false, Items: items}, nil)
 				}
 				
-				// Check if it's a struct type (only after checking built-in types)
+				// Check if it's an object literal type
+				if sym.Type == "object" && sym.Fields != nil && len(sym.Fields) > 0 {
+					// Add object literal property completions
+					for fieldName, field := range sym.Fields {
+						if prefix == "" || strings.HasPrefix(fieldName, prefix) {
+							items = append(items, protocol.CompletionItem{
+								Label:  fieldName,
+								Kind:   protocol.CompletionItemKindProperty,
+								Detail: field.Type,
+							})
+						}
+					}
+					
+					// Return early with object literal property completions
+					result := protocol.CompletionList{
+						IsIncomplete: false,
+						Items:        items,
+					}
+					return reply(ctx, result, nil)
+				}
+				
+				// Check if it's a struct type (only after checking built-in types and object literals)
 				if sym.Kind == SymbolKindVariable || sym.Kind == SymbolKindConstant {
 					// Get struct fields based on the variable's type
 					fields := symbolTable.GetStructFields(sym.Type)
+					
 					if fields != nil && len(fields) > 0 {
 						// Add struct field completions
 						for fieldName, field := range fields {

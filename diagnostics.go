@@ -63,6 +63,14 @@ func (s *Server) publishDiagnostics(ctx context.Context, doc *Document) {
 			// Check variable/constant type mismatches
 			typeMismatchDiags := checkTypeMismatches(doc)
 			diagnostics = append(diagnostics, typeMismatchDiags...)
+			
+			// Check struct member access and property validation
+			memberAccessDiags := checkStructMemberAccess(doc)
+			diagnostics = append(diagnostics, memberAccessDiags...)
+			
+			// Check object literal property assignment
+			objectPropDiags := checkObjectPropertyAssignment(doc)
+			diagnostics = append(diagnostics, objectPropDiags...)
 		}
 	}
 
@@ -1060,6 +1068,14 @@ func checkUndeclaredIdentifiers(doc *Document) []protocol.Diagnostic {
 		return diagnostics
 	}
 
+	// Track scope stack as we traverse
+	type scopeInfo struct {
+		scope      *Scope
+		childIndex int // Which child scope we're currently using
+	}
+	
+	scopeStack := []scopeInfo{{scope: doc.SymbolTable.GlobalScope, childIndex: 0}}
+
 	// Walk the AST looking for identifier usage
 	var checkNode func(*ahoy.ASTNode)
 	checkNode = func(node *ahoy.ASTNode) {
@@ -1067,24 +1083,22 @@ func checkUndeclaredIdentifiers(doc *Document) []protocol.Diagnostic {
 			return
 		}
 
+		currentInfo := &scopeStack[len(scopeStack)-1]
+		scope := currentInfo.scope
+
 		// Check identifiers in various contexts
 		switch node.Type {
 		case ahoy.NODE_IDENTIFIER:
-			// Skip if this is part of a declaration (left side of assignment)
-			// or function/enum/struct declaration
-			// We only want to check usage, not declarations
-			
 			identifierName := node.Value
 			
-			// Look up the identifier in symbol table
-			sym := doc.SymbolTable.GlobalScope.Lookup(identifierName)
+			// Look up the identifier in the current scope (searches parent scopes too)
+			sym := scope.Lookup(identifierName)
 			
 			if sym == nil {
-				// Identifier not found - determine what type it likely is
+				// Identifier not found
 				identifierType := "variable"
 				
-				// Check naming convention to guess type
-				// Constants are typically ALL_CAPS
+				// Check naming convention
 				isAllCaps := true
 				for _, ch := range identifierName {
 					if ch >= 'a' && ch <= 'z' {
@@ -1097,7 +1111,6 @@ func checkUndeclaredIdentifiers(doc *Document) []protocol.Diagnostic {
 					identifierType = "constant"
 				}
 				
-				// Build error message
 				message := "Use of undeclared " + identifierType + " '" + identifierName + "'"
 				
 				lineText := ""
@@ -1129,41 +1142,87 @@ func checkUndeclaredIdentifiers(doc *Document) []protocol.Diagnostic {
 			}
 
 		case ahoy.NODE_ASSIGNMENT, ahoy.NODE_VARIABLE_DECLARATION:
-			// For assignments, check the right side (value) but not the left side (name)
-			// Skip the first child (variable name being declared)
+			// For assignments, check the right side but not the left side
 			for i := 1; i < len(node.Children); i++ {
 				checkNode(node.Children[i])
 			}
-			return // Don't recurse further
+			return
 
 		case ahoy.NODE_CONSTANT_DECLARATION:
 			// For const declarations, check the right side but not the name
 			for i := 1; i < len(node.Children); i++ {
 				checkNode(node.Children[i])
 			}
-			return // Don't recurse further
+			return
 
 		case ahoy.NODE_FUNCTION:
-			// Skip function name and parameters, only check body
-			if len(node.Children) > 1 {
-				checkNode(node.Children[1]) // Function body
+			// Push function scope (take next child scope)
+			if currentInfo.childIndex < len(scope.Children) {
+				funcScope := scope.Children[currentInfo.childIndex]
+				currentInfo.childIndex++
+				scopeStack = append(scopeStack, scopeInfo{scope: funcScope, childIndex: 0})
+				
+				// Check function body
+				if len(node.Children) > 1 {
+					checkNode(node.Children[1])
+				}
+				
+				scopeStack = scopeStack[:len(scopeStack)-1]
 			}
-			return // Don't recurse further
+			return
+
+		case ahoy.NODE_WHILE_LOOP, ahoy.NODE_FOR_RANGE_LOOP, ahoy.NODE_FOR_COUNT_LOOP,
+			ahoy.NODE_FOR_IN_ARRAY_LOOP, ahoy.NODE_FOR_IN_DICT_LOOP:
+			// Push loop scope (take next child scope from current scope)
+			if currentInfo.childIndex < len(scope.Children) {
+				loopScope := scope.Children[currentInfo.childIndex]
+				currentInfo.childIndex++
+				scopeStack = append(scopeStack, scopeInfo{scope: loopScope, childIndex: 0})
+				
+				// Determine which children to skip (variable declarations)
+				startIdx := 0
+				switch node.Type {
+				case ahoy.NODE_FOR_RANGE_LOOP:
+					startIdx = 1 // Skip loop var
+				case ahoy.NODE_WHILE_LOOP:
+					if len(node.Children) >= 3 && node.Children[0].Type == ahoy.NODE_IDENTIFIER {
+						startIdx = 1 // Skip loop var
+					}
+				case ahoy.NODE_FOR_COUNT_LOOP:
+					if len(node.Children) >= 2 && node.Children[0].Type == ahoy.NODE_IDENTIFIER {
+						startIdx = 1 // Skip loop var
+					}
+				case ahoy.NODE_FOR_IN_ARRAY_LOOP:
+					startIdx = 1 // Skip element var
+				case ahoy.NODE_FOR_IN_DICT_LOOP:
+					startIdx = 2 // Skip key and value vars
+				}
+				
+				// Check children with loop scope
+				for i := startIdx; i < len(node.Children); i++ {
+					checkNode(node.Children[i])
+				}
+				
+				scopeStack = scopeStack[:len(scopeStack)-1]
+			} else {
+				// No more child scopes, check with current scope
+				for i := 0; i < len(node.Children); i++ {
+					checkNode(node.Children[i])
+				}
+			}
+			return
 
 		case ahoy.NODE_ENUM_DECLARATION, ahoy.NODE_STRUCT_DECLARATION:
-			// Skip enum/struct declarations entirely
 			return
 
 		case ahoy.NODE_CALL:
-			// Function calls are handled by checkUndefinedFunctions
-			// But we still need to check the arguments
 			for _, child := range node.Children {
 				checkNode(child)
 			}
 			return
 		}
 
-		// Recursively check children for other node types
+		// Recursively check children
 		for _, child := range node.Children {
 			checkNode(child)
 		}
@@ -1171,6 +1230,47 @@ func checkUndeclaredIdentifiers(doc *Document) []protocol.Diagnostic {
 
 	checkNode(doc.AST)
 	return diagnostics
+}
+
+// findScopeForLine finds the most specific scope that contains the given line
+func findScopeForLine(scope *Scope, line int) *Scope {
+	if scope == nil {
+		return nil
+	}
+	
+	// First check direct children
+	for _, child := range scope.Children {
+		if child.StartLine <= line && (child.EndLine == 0 || child.EndLine >= line) {
+			// Recursively search in child scopes for a more specific match
+			if nestedScope := findScopeForLine(child, line); nestedScope != nil {
+				return nestedScope
+			}
+			return child
+		}
+	}
+	
+	// If current scope contains the line, return it
+	if scope.StartLine <= line && (scope.EndLine == 0 || scope.EndLine >= line) {
+		return scope
+	}
+	
+	return nil
+}
+
+// findFunctionScope finds the child scope that contains the given line (function scope)
+func findFunctionScope(scope *Scope, line int) *Scope {
+	if scope == nil {
+		return nil
+	}
+	
+	// Check each child scope to see if it contains this line
+	for _, child := range scope.Children {
+		if child.StartLine <= line && (child.EndLine == 0 || child.EndLine >= line) {
+			return child
+		}
+	}
+	
+	return nil
 }
 
 // checkFunctionCallArgumentCounts checks if function calls have the correct number of arguments
