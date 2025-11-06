@@ -195,6 +195,7 @@ func (s *Server) handleDidOpen(ctx context.Context, reply jsonrpc2.Replier, req 
 	if doc.AST != nil {
 		debugLog.Printf("Building symbol table...")
 		doc.SymbolTable = BuildSymbolTable(doc.AST)
+		doc.SymbolTable.Doc = doc // Set document reference
 		debugLog.Printf("Symbol table built")
 		
 		// Extract C header imports
@@ -321,6 +322,7 @@ func (s *Server) handleDidChange(ctx context.Context, reply jsonrpc2.Replier, re
 		// Rebuild symbol table - only if AST exists
 		if doc.AST != nil {
 			doc.SymbolTable = BuildSymbolTable(doc.AST)
+			doc.SymbolTable.Doc = doc // Set document reference
 			// Extract C header imports
 			doc.CHeaders, doc.CHeaderGlobal = extractCHeaderInfo(doc.AST)
 		} else {

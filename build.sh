@@ -7,6 +7,7 @@ echo "Building Ahoy Language Server..."
 if pgrep "zed" > /dev/null; then
     echo "zed is running. Killing it..."
     killall zed-editor
+    killall ahoy-lsp
 fi
 
 # Get the directory where this script is located

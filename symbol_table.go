@@ -86,6 +86,8 @@ func (s *Scope) LookupLocal(name string) *Symbol {
 type SymbolTable struct {
 	GlobalScope  *Scope
 	CurrentScope *Scope
+	AST          *ahoy.ASTNode // Store AST root for function lookups
+	Doc          *Document     // Store document for type inference
 }
 
 func NewSymbolTable() *SymbolTable {
@@ -179,6 +181,7 @@ func BuildSymbolTable(ast *ahoy.ASTNode) *SymbolTable {
 	}
 
 	st := NewSymbolTable()
+	st.AST = ast // Store AST for lookups
 	st.walkNode(ast, 0)
 	return st
 }
@@ -306,22 +309,63 @@ func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
 						
 						// Look up function to get return types
 						funcSymbol := st.Lookup(funcName)
-						if funcSymbol != nil && funcSymbol.Type != "" && funcSymbol.Type != "void" {
-							// Parse return types from function signature
-							returnTypes := strings.Split(funcSymbol.Type, ",")
+						if funcSymbol != nil {
+							returnTypeStr := funcSymbol.Type
 							
-							// Find which position this variable is at
-							varIndex := -1
-							for i, child := range leftSide.Children {
-								if child == leftChild {
-									varIndex = i
-									break
+							// If function has infer/generic return type, actually infer it
+							if returnTypeStr == "infer" || returnTypeStr == "" || returnTypeStr == "generic" {
+								// Find the function node in the AST
+								var funcNode *ahoy.ASTNode
+								var findFunc func(*ahoy.ASTNode)
+								findFunc = func(n *ahoy.ASTNode) {
+									if n == nil {
+										return
+									}
+									if n.Type == ahoy.NODE_FUNCTION && n.Value == funcName {
+										funcNode = n
+										return
+									}
+									for _, child := range n.Children {
+										findFunc(child)
+									}
+								}
+								if st.AST != nil {
+									findFunc(st.AST)
+								}
+								
+								// Infer argument types from the call
+								var argTypes []string
+								for _, arg := range callNode.Children {
+									argType := inferExpressionType(arg, st.Doc)
+									argTypes = append(argTypes, argType)
+								}
+								
+								// Infer actual return types by tracing through function
+								if funcNode != nil && st.Doc != nil {
+									inferredTypes := inferFunctionReturnTypes(funcNode, argTypes, st.Doc)
+									if len(inferredTypes) > 0 {
+										returnTypeStr = strings.Join(inferredTypes, ",")
+									}
 								}
 							}
 							
-							// Use the corresponding return type if available
-							if varIndex >= 0 && varIndex < len(returnTypes) {
-								varType = strings.TrimSpace(returnTypes[varIndex])
+							// Parse and assign return types
+							if returnTypeStr != "" && returnTypeStr != "void" {
+								returnTypes := strings.Split(returnTypeStr, ",")
+								
+								// Find which position this variable is at
+								varIndex := -1
+								for i, child := range leftSide.Children {
+									if child == leftChild {
+										varIndex = i
+										break
+									}
+								}
+								
+								// Use the corresponding return type if available
+								if varIndex >= 0 && varIndex < len(returnTypes) {
+									varType = strings.TrimSpace(returnTypes[varIndex])
+								}
 							}
 						}
 					}
@@ -701,9 +745,63 @@ func (st *SymbolTable) inferType(node *ahoy.ASTNode) string {
 			return sym.Type
 		}
 	case ahoy.NODE_CALL:
-		// Try to look up function return type
-		if sym := st.Lookup(node.Value); sym != nil {
-			return sym.Type
+		// Try to look up function return type and actually infer it if needed
+		funcName := node.Value
+		if sym := st.Lookup(funcName); sym != nil {
+			returnType := sym.Type
+			
+			debugLog.Printf("DEBUG inferType: Function %s has return type: %s", funcName, returnType)
+			
+			// If function has infer/generic return type, actually infer it
+			if returnType == "infer" || returnType == "" || returnType == "generic" || strings.Contains(returnType, "generic") {
+				debugLog.Printf("DEBUG inferType: Need to infer for %s", funcName)
+				
+				// Find the function node in the AST
+				var funcNode *ahoy.ASTNode
+				var findFunc func(*ahoy.ASTNode)
+				findFunc = func(n *ahoy.ASTNode) {
+					if n == nil {
+						return
+					}
+					if n.Type == ahoy.NODE_FUNCTION && n.Value == funcName {
+						funcNode = n
+						return
+					}
+					for _, child := range n.Children {
+						findFunc(child)
+					}
+				}
+				if st.AST != nil {
+					findFunc(st.AST)
+				}
+				
+				if funcNode != nil {
+					debugLog.Printf("DEBUG inferType: Found function node for %s", funcName)
+				}
+				
+				// Infer argument types from the call
+				var argTypes []string
+				for _, arg := range node.Children {
+					argType := inferExpressionType(arg, st.Doc)
+					argTypes = append(argTypes, argType)
+				}
+				
+				debugLog.Printf("DEBUG inferType: Argument types: %v", argTypes)
+				
+				// Infer actual return types by tracing through function
+				if funcNode != nil && st.Doc != nil {
+					inferredTypes := inferFunctionReturnTypes(funcNode, argTypes, st.Doc)
+					debugLog.Printf("DEBUG inferType: Inferred types: %v", inferredTypes)
+					if len(inferredTypes) > 0 {
+						result := strings.Join(inferredTypes, ",")
+						debugLog.Printf("DEBUG inferType: Returning inferred type: %s", result)
+						return result
+					}
+				}
+			}
+			
+			debugLog.Printf("DEBUG inferType: Returning original type: %s", returnType)
+			return returnType
 		}
 	}
 
