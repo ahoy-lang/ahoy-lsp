@@ -16,14 +16,16 @@ import (
 )
 
 type Document struct {
-	URI         uri.URI
-	Content     string
-	Lines       []string // Cached split lines
-	Version     int32
-	Tokens      []ahoy.Token
-	AST         *ahoy.ASTNode
-	Errors      []ahoy.ParseError
-	SymbolTable *SymbolTable
+	URI           uri.URI
+	Content       string
+	Lines         []string // Cached split lines
+	Version       int32
+	Tokens        []ahoy.Token
+	AST           *ahoy.ASTNode
+	Errors        []ahoy.ParseError
+	SymbolTable   *SymbolTable
+	CHeaders      map[string]*ahoy.CHeaderInfo // namespace -> C header info
+	CHeaderGlobal *ahoy.CHeaderInfo             // Global C header imports
 }
 
 type Server struct {
@@ -194,8 +196,20 @@ func (s *Server) handleDidOpen(ctx context.Context, reply jsonrpc2.Replier, req 
 		debugLog.Printf("Building symbol table...")
 		doc.SymbolTable = BuildSymbolTable(doc.AST)
 		debugLog.Printf("Symbol table built")
+		
+		// Extract C header imports
+		debugLog.Printf("Extracting C header imports...")
+		doc.CHeaders, doc.CHeaderGlobal = extractCHeaderInfo(doc.AST)
+		debugLog.Printf("C headers extracted: %d namespaced, global has %d functions", 
+			len(doc.CHeaders), len(doc.CHeaderGlobal.Functions))
 	} else {
 		doc.SymbolTable = NewSymbolTable()
+		doc.CHeaders = make(map[string]*ahoy.CHeaderInfo)
+		doc.CHeaderGlobal = &ahoy.CHeaderInfo{
+			Functions: make(map[string]*ahoy.CFunction),
+			Enums:     make(map[string]*ahoy.CEnum),
+			Defines:   make(map[string]*ahoy.CDefine),
+		}
 	}
 
 	s.mu.Lock()
@@ -307,8 +321,16 @@ func (s *Server) handleDidChange(ctx context.Context, reply jsonrpc2.Replier, re
 		// Rebuild symbol table - only if AST exists
 		if doc.AST != nil {
 			doc.SymbolTable = BuildSymbolTable(doc.AST)
+			// Extract C header imports
+			doc.CHeaders, doc.CHeaderGlobal = extractCHeaderInfo(doc.AST)
 		} else {
 			doc.SymbolTable = NewSymbolTable()
+			doc.CHeaders = make(map[string]*ahoy.CHeaderInfo)
+			doc.CHeaderGlobal = &ahoy.CHeaderInfo{
+				Functions: make(map[string]*ahoy.CFunction),
+				Enums:     make(map[string]*ahoy.CEnum),
+				Defines:   make(map[string]*ahoy.CDefine),
+			}
 		}
 	}
 	s.mu.Unlock()
@@ -361,4 +383,64 @@ func (s *Server) getDocument(docURI uri.URI) *Document {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.documents[docURI]
+}
+
+// extractCHeaderInfo walks the AST and extracts C header import information
+func extractCHeaderInfo(ast *ahoy.ASTNode) (map[string]*ahoy.CHeaderInfo, *ahoy.CHeaderInfo) {
+	cHeaders := make(map[string]*ahoy.CHeaderInfo)
+	cHeaderGlobal := &ahoy.CHeaderInfo{
+		Functions: make(map[string]*ahoy.CFunction),
+		Enums:     make(map[string]*ahoy.CEnum),
+		Defines:   make(map[string]*ahoy.CDefine),
+		Structs:   make(map[string]*ahoy.CStruct),
+	}
+	
+	if ast == nil {
+		return cHeaders, cHeaderGlobal
+	}
+	
+	// Walk through top-level nodes looking for imports
+	for _, child := range ast.Children {
+		if child.Type == ahoy.NODE_IMPORT_STATEMENT {
+			path := child.Value
+			namespace := child.DataType // namespace stored in DataType field
+			
+			// Only process .h files
+			if !strings.HasSuffix(path, ".h") {
+				continue
+			}
+			
+			// Parse the C header
+			headerInfo, err := ahoy.ParseCHeader(path)
+			if err != nil {
+				debugLog.Printf("Failed to parse C header %s: %v", path, err)
+				continue
+			}
+			
+			if namespace != "" {
+				// Store with namespace
+				cHeaders[namespace] = headerInfo
+				debugLog.Printf("Loaded C header %s with namespace '%s': %d functions, %d enums, %d structs", 
+					path, namespace, len(headerInfo.Functions), len(headerInfo.Enums), len(headerInfo.Structs))
+			} else {
+				// Merge into global
+				for name, fn := range headerInfo.Functions {
+					cHeaderGlobal.Functions[name] = fn
+				}
+				for name, enum := range headerInfo.Enums {
+					cHeaderGlobal.Enums[name] = enum
+				}
+				for name, def := range headerInfo.Defines {
+					cHeaderGlobal.Defines[name] = def
+				}
+				for name, str := range headerInfo.Structs {
+					cHeaderGlobal.Structs[name] = str
+				}
+				debugLog.Printf("Loaded C header %s globally: %d functions, %d enums, %d structs", 
+					path, len(headerInfo.Functions), len(headerInfo.Enums), len(headerInfo.Structs))
+			}
+		}
+	}
+	
+	return cHeaders, cHeaderGlobal
 }

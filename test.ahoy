@@ -4,9 +4,7 @@ import "raylib.h"
 
 ? Invalid function - missinising 'do'
 test::"kjlkjlk"
-test::"kjklkjlk"
-test::"kjklkjlk"
-tkest::"kjklkjlk"
+TEST::"kjklkjlk"
 tkest::"kjklkjlk"
 bob::"kjklkjlk"
 BOB::"kjl"
@@ -16,18 +14,19 @@ test:"kjklkjlk"
 
 print|BOB|
 ? Valid function
-greet :: | name:string |:
+greet :: | name:string | :
 	ahoy|f"Hello, {}"|
 
-greet2 :: |name:int|void:
+greet2 :: |name:int| void:
 	ahoy|"Hello,"|
 
-
-if kjdklj.length|| > 10 then print |"kkdlfj"
+? if greet3.length|| > 10 then print |"hello"|
 
 ? Valid loop
-loop i from: 1 to 10 do
-	ahoy|i|
+loop i from 0 to 10 do
+	print|"Hello"|
+	? |i| loop from 1 to 10:
+	? 	ahoy|j|
 
 ? Valid if statement
 x: 42
@@ -39,7 +38,7 @@ another_var: "test"
 test_bool: true
 
 ? Invalid syntax - missing assignment operator
-bad_variable "this is wrong"
+bad_variable: "this is wrong"
 
 
 
@@ -59,9 +58,10 @@ struct point:
 		y: int
 ? Enum declaration
 
-enum status:
-	PENDING
-	ACTIVE
+enum examp:
+	ONE
+	TWO
+	THREE
 
 lkjlkj :: |test:string|: print|"This is a test"|
 
@@ -77,16 +77,44 @@ flag2: true or false
 flag3: not flag
 
 ? Array operations
-numbers: [1, 2, 3, 4, 5]
-first: numbers[0]
+numbers: [1, 2, 3, 4, 5] ? array literal
+first: numbers[0] ? valid no compiler error
+first: numbers{0} ? linter error "invalid array access syntax, use array[] instead of dict{}"
+first: numbers<0> ? linter error "invalid array access syntax, use array[] instead of object<>"
+
+? dict access
+dict_numbers: {1:"one", 2:"two", 3:"three", 4:"four", 5:"five"} ? dict literal
+first: dict_numbers["1"] ? linter error "invalid dict access syntax, use dict{} instead of array[]"
+first: dict_numbers{"1"} ? valid syntax no compiler error
+first: dict_numbers<"1"> ? linter error "invalid dict access syntax, use dict{} instead of object<>"
+
+? object access
+first: object_numbers["one"] ? linter error "invalid dict access syntax, use dict{} instead of array[]"
+first: object_numbers{"one"} ? linter	error "invalid object access syntax, use object<> instead of array[]"
+first: object_numbers<"one"> ? valid syntax no compiler error
+first: object_numbers<"one"> ? valid syntax no compiler error
+
+object_numbers: <one:"one", two:"two", three:"three", four:"four", five:"five"> ? fyi this is an object literal not an array literal
+
+object_numbers: <1:"one", 2:"two", 3:"three", 4:"four", 5:"five"> ? should give linter error	 "object keys must be strings"
+first: object_numbers.one ? valid syntax should not give compiler error fives use of undecalered variable
+
+numbersk: {1:9, 2, 3, 4, 5}
+
+first: numbers[0] ? linter error "invalid dict access syntax, use dict{} instead of array[]"
+first: numbers{0} ? valid syntax no compiler error
+first: numbers<0> ? linter error "invalid dict access syntax, use dict{} instead of object<>"
 
 ? Dictionary
-person: {"name": "Alice", "age": 30}
+? person: {"name": "Alice", "age": 30}
 name_val: person["name"]
 
 ? This should trigger autocomplete when you type 'fu' or 'lo' or 'if'
 
-person: <name: "Alice", age: 30>? if we have struct with these explicit properties we infer the type to be person
+person: <test:"bye">
+person<"test"> : "hello"
+person.test : "hello"
+
 
 struct person:
 	name: string
@@ -96,9 +124,7 @@ struct person:
 
 
 person: <name: "Alice", age: 30, height: 12> ? would be inferred as person.dwarf type
-person: <name: "Alice", age: 30>
 print|f"{person.name}"|
-person.strip||
 
 
 
@@ -106,12 +132,16 @@ person.strip||
 print|f"{person.type}"|
 test_di:dict= {"name": "Alice", "age": 30}
 
-person: <name: "Alice", age: 30>
-dict_example:dict= {name: "Alice", age: 30}? if we have struct with these explicit properties we infer the type to be person
+test_arraay : [299,90]
+test_arraay[0]
+person['name'] : "bob"
+dict_example:dict= {"name": "Alice", "age": 30}? if we have struct with these explicit properties we infer the type to be person
 person<'name'> : "bob"
 dict_example{"name"} : "charlene"
 
-numbers: [1, 2, 3, 4, 5]
+numbers:array=  [1, 2, 3, 4, 5]
+
+
 
 testk: "larry"
 
@@ -122,7 +152,7 @@ name:string= 29 ? typed should throw linting error "expected string got int"
 
 age: 29 ? type inferred as int
 age:int= 29 ? explicitly typed as int
-age:string= "age" ? typed should throw linting error "expected int got string"
-age: 29 ? variable type inferred as int
+age9:string= "age" ? typed should throw linting error "expected int got string"
+agek:float= 29.0 ? variable type inferred as int
 age:: 29 ? const type inferred as int
 name::string= 29 ? const type should throw linting error "expected string got int"

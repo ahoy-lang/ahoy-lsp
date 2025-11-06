@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"ahoy"
+
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 )
@@ -18,7 +20,7 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 	debugLog.Printf("Hover request at line %d, char %d", params.Position.Line, params.Position.Character)
 
 	doc := s.getDocument(params.TextDocument.URI)
-	if doc == nil || doc.SymbolTable == nil {
+	if doc == nil {
 		return reply(ctx, nil, nil)
 	}
 
@@ -40,11 +42,44 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 
 	debugLog.Printf("Hover word: %s", word)
 
-	// Look up the symbol
-	symbol := doc.SymbolTable.Lookup(word)
-	if symbol == nil {
-		// Check if it's a keyword
-		if hoverText := getKeywordHover(word); hoverText != "" {
+	// Check if it's a C function/enum/define
+	if doc.CHeaderGlobal != nil {
+		// Check C functions
+		for cFuncName, cFunc := range doc.CHeaderGlobal.Functions {
+			if ahoy.PascalToSnake(cFuncName) == word {
+				paramList := ""
+				for i, param := range cFunc.Parameters {
+					if i > 0 {
+						paramList += ", "
+					}
+					paramList += param.Type
+					if param.Name != "" {
+						paramList += " " + param.Name
+					}
+				}
+				
+				hoverText := fmt.Sprintf("```c\n%s %s(%s)\n```\n\n", cFunc.ReturnType, cFuncName, paramList)
+				hoverText += fmt.Sprintf("**C Function** from imported header\n\n")
+				hoverText += fmt.Sprintf("Call as: `%s|...|`", word)
+				
+				hover := protocol.Hover{
+					Contents: protocol.MarkupContent{
+						Kind:  protocol.Markdown,
+						Value: hoverText,
+					},
+				}
+				return reply(ctx, hover, nil)
+			}
+		}
+		
+		// Check C enums
+		if cEnum, ok := doc.CHeaderGlobal.Enums[word]; ok {
+			hoverText := fmt.Sprintf("```c\n%s\n```\n\n", word)
+			hoverText += "**C Enum** from imported header\n\n"
+			if cEnum.Value != "" {
+				hoverText += fmt.Sprintf("Value: `%s`", cEnum.Value)
+			}
+			
 			hover := protocol.Hover{
 				Contents: protocol.MarkupContent{
 					Kind:  protocol.Markdown,
@@ -53,30 +88,167 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 			}
 			return reply(ctx, hover, nil)
 		}
-		return reply(ctx, nil, nil)
+		
+		// Check C defines
+		if cDefine, ok := doc.CHeaderGlobal.Defines[word]; ok {
+			hoverText := fmt.Sprintf("```c\n#define %s %s\n```\n\n", word, cDefine.Value)
+			hoverText += "**C Define** from imported header"
+			
+			hover := protocol.Hover{
+				Contents: protocol.MarkupContent{
+					Kind:  protocol.Markdown,
+					Value: hoverText,
+				},
+			}
+			return reply(ctx, hover, nil)
+		}
+		
+		// Check C structs (case-insensitive match)
+		for structName, cStruct := range doc.CHeaderGlobal.Structs {
+			if ahoy.ToLowerFirst(structName) == word || structName == word {
+				hoverText := fmt.Sprintf("```c\ntypedef struct %s {\n", structName)
+				for _, field := range cStruct.Fields {
+					hoverText += fmt.Sprintf("    %s %s;\n", field.Type, field.Name)
+				}
+				hoverText += fmt.Sprintf("} %s;\n```\n\n", structName)
+				hoverText += fmt.Sprintf("**C Struct** from imported header\n\n")
+				hoverText += fmt.Sprintf("Use as: `%s<field1: val1, field2: val2>`", word)
+				
+				hover := protocol.Hover{
+					Contents: protocol.MarkupContent{
+						Kind:  protocol.Markdown,
+						Value: hoverText,
+					},
+				}
+				return reply(ctx, hover, nil)
+			}
+		}
+	}
+	
+	// Check namespaced C headers
+	for _, headerInfo := range doc.CHeaders {
+		// Check functions
+		for cFuncName, cFunc := range headerInfo.Functions {
+			if ahoy.PascalToSnake(cFuncName) == word {
+				paramList := ""
+				for i, param := range cFunc.Parameters {
+					if i > 0 {
+						paramList += ", "
+					}
+					paramList += param.Type
+					if param.Name != "" {
+						paramList += " " + param.Name
+					}
+				}
+				
+				hoverText := fmt.Sprintf("```c\n%s %s(%s)\n```\n\n", cFunc.ReturnType, cFuncName, paramList)
+				hoverText += "**C Function** from namespaced import\n\n"
+				hoverText += fmt.Sprintf("Call as: `%s|...|`", word)
+				
+				hover := protocol.Hover{
+					Contents: protocol.MarkupContent{
+						Kind:  protocol.Markdown,
+						Value: hoverText,
+					},
+				}
+				return reply(ctx, hover, nil)
+			}
+		}
+		
+		// Check enums
+		if cEnum, ok := headerInfo.Enums[word]; ok {
+			hoverText := fmt.Sprintf("```c\n%s\n```\n\n", word)
+			hoverText += "**C Enum** from namespaced import\n\n"
+			if cEnum.Value != "" {
+				hoverText += fmt.Sprintf("Value: `%s`", cEnum.Value)
+			}
+			
+			hover := protocol.Hover{
+				Contents: protocol.MarkupContent{
+					Kind:  protocol.Markdown,
+					Value: hoverText,
+				},
+			}
+			return reply(ctx, hover, nil)
+		}
+		
+		// Check defines
+		if cDefine, ok := headerInfo.Defines[word]; ok {
+			hoverText := fmt.Sprintf("```c\n#define %s %s\n```\n\n", word, cDefine.Value)
+			hoverText += "**C Define** from namespaced import"
+			
+			hover := protocol.Hover{
+				Contents: protocol.MarkupContent{
+					Kind:  protocol.Markdown,
+					Value: hoverText,
+				},
+			}
+			return reply(ctx, hover, nil)
+		}
+		
+		// Check structs
+		for structName, cStruct := range headerInfo.Structs {
+			if ahoy.ToLowerFirst(structName) == word || structName == word {
+				hoverText := fmt.Sprintf("```c\ntypedef struct %s {\n", structName)
+				for _, field := range cStruct.Fields {
+					hoverText += fmt.Sprintf("    %s %s;\n", field.Type, field.Name)
+				}
+				hoverText += fmt.Sprintf("} %s;\n```\n\n", structName)
+				hoverText += "**C Struct** from namespaced import\n\n"
+				hoverText += fmt.Sprintf("Use as: `%s<field1: val1, field2: val2>`", word)
+				
+				hover := protocol.Hover{
+					Contents: protocol.MarkupContent{
+						Kind:  protocol.Markdown,
+						Value: hoverText,
+					},
+				}
+				return reply(ctx, hover, nil)
+			}
+		}
 	}
 
-	// Build hover content
-	hoverText := buildHoverText(symbol)
+	// Look up Ahoy symbol in the symbol table
+	if doc.SymbolTable != nil {
+		symbol := doc.SymbolTable.Lookup(word)
+		if symbol == nil {
+			// Check if it's a keyword
+			if hoverText := getKeywordHover(word); hoverText != "" {
+				hover := protocol.Hover{
+					Contents: protocol.MarkupContent{
+						Kind:  protocol.Markdown,
+						Value: hoverText,
+					},
+				}
+				return reply(ctx, hover, nil)
+			}
+			return reply(ctx, nil, nil)
+		}
 
-	hover := protocol.Hover{
-		Contents: protocol.MarkupContent{
-			Kind:  protocol.Markdown,
-			Value: hoverText,
-		},
-		Range: &protocol.Range{
-			Start: protocol.Position{
-				Line:      uint32(symbol.Line - 1),
-				Character: uint32(symbol.Column),
+		// Build hover content
+		hoverText := buildHoverText(symbol)
+
+		hover := protocol.Hover{
+			Contents: protocol.MarkupContent{
+				Kind:  protocol.Markdown,
+				Value: hoverText,
 			},
-			End: protocol.Position{
-				Line:      uint32(symbol.Line - 1),
-				Character: uint32(symbol.Column + len(symbol.Name)),
+			Range: &protocol.Range{
+				Start: protocol.Position{
+					Line:      uint32(symbol.Line - 1),
+					Character: uint32(symbol.Column),
+				},
+				End: protocol.Position{
+					Line:      uint32(symbol.Line - 1),
+					Character: uint32(symbol.Column + len(symbol.Name)),
+				},
 			},
-		},
+		}
+
+		return reply(ctx, hover, nil)
 	}
 
-	return reply(ctx, hover, nil)
+	return reply(ctx, nil, nil)
 }
 
 func buildHoverText(symbol *Symbol) string {

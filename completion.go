@@ -3,7 +3,10 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
+
+	"ahoy"
 
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
@@ -47,6 +50,95 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 		}
 		start++
 		prefix = currentLine[start:params.Position.Character]
+	}
+	
+	// FIRST: Check if we're typing after a C header namespace prefix (e.g., "rl.")
+	// This must be checked BEFORE general dot completion
+	if params.Position.Character > 0 {
+		checkPos := int(params.Position.Character) - len(prefix) - 1
+		if checkPos >= 0 && checkPos < len(currentLine) && currentLine[checkPos] == '.' {
+			// Found a dot, check if what's before it is a C header namespace
+			identEnd := checkPos - 1
+			identStart := identEnd
+			for identStart >= 0 && (isIdentifierChar(rune(currentLine[identStart])) || currentLine[identStart] == '_') {
+				identStart--
+			}
+			identStart++
+			if identStart <= identEnd {
+				possibleNamespace := currentLine[identStart : identEnd+1]
+				
+				// Check if this is a C header namespace
+				if headerInfo, ok := doc.CHeaders[possibleNamespace]; ok {
+					// Yes! Provide C header namespace completions
+					items := []protocol.CompletionItem{}
+					
+					// Add namespace functions (snake_case)
+					for funcName, cFunc := range headerInfo.Functions {
+						snakeName := ahoy.PascalToSnake(funcName)
+						if prefix == "" || strings.HasPrefix(snakeName, prefix) {
+							paramList := ""
+							for i, param := range cFunc.Parameters {
+								if i > 0 {
+									paramList += ", "
+								}
+								if param.Name != "" {
+									paramList += param.Name
+								} else {
+									paramList += param.Type
+								}
+							}
+							
+							items = append(items, protocol.CompletionItem{
+								Label:  snakeName,
+								Kind:   protocol.CompletionItemKindFunction,
+								Detail: fmt.Sprintf("%s -> %s", paramList, cFunc.ReturnType),
+							})
+						}
+					}
+					
+					// Add namespace enums
+					for enumName := range headerInfo.Enums {
+						if prefix == "" || strings.HasPrefix(enumName, prefix) {
+							items = append(items, protocol.CompletionItem{
+								Label:  enumName,
+								Kind:   protocol.CompletionItemKindEnumMember,
+								Detail: "C enum",
+							})
+						}
+					}
+					
+					// Add namespace defines
+					for defineName := range headerInfo.Defines {
+						if prefix == "" || strings.HasPrefix(defineName, prefix) {
+							items = append(items, protocol.CompletionItem{
+								Label:  defineName,
+								Kind:   protocol.CompletionItemKindConstant,
+								Detail: "C define",
+							})
+						}
+					}
+					
+					// Add namespace structs (lowercase first letter)
+					for structName := range headerInfo.Structs {
+						lowerName := ahoy.ToLowerFirst(structName)
+						if prefix == "" || strings.HasPrefix(lowerName, prefix) || strings.HasPrefix(structName, prefix) {
+							items = append(items, protocol.CompletionItem{
+								Label:  lowerName,
+								Kind:   protocol.CompletionItemKindStruct,
+								Detail: fmt.Sprintf("C struct %s", structName),
+							})
+						}
+					}
+					
+					// Return early with namespace completions
+					result := protocol.CompletionList{
+						IsIncomplete: false,
+						Items:        items,
+					}
+					return reply(ctx, result, nil)
+				}
+			}
+		}
 	}
 	
 	// Check if we're after a dot (.) for method completion
@@ -171,6 +263,29 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 				// Check if it's a dict type for dictionary methods
 				if sym.Type == "dict" {
 					items = addDictMethods(items, prefix)
+					return reply(ctx, protocol.CompletionList{IsIncomplete: false, Items: items}, nil)
+				}
+				
+				// Check if it's an enum type
+				if sym.Kind == SymbolKindEnum {
+					// Add enum member completions
+					for memberName, field := range sym.Fields {
+						if prefix == "" || strings.HasPrefix(memberName, prefix) {
+							// field.Type contains the enum value (or "auto")
+							detailText := fmt.Sprintf("enum %s", beforePrefix)
+							if field.Type != "" && field.Type != "auto" {
+								detailText = fmt.Sprintf("%s:%s %s", memberName, field.Type, detailText)
+							} else {
+								detailText = fmt.Sprintf("%s %s", memberName, detailText)
+							}
+							
+							items = append(items, protocol.CompletionItem{
+								Label:  memberName,
+								Kind:   protocol.CompletionItemKindEnumMember,
+								Detail: detailText,
+							})
+						}
+					}
 					return reply(ctx, protocol.CompletionList{IsIncomplete: false, Items: items}, nil)
 				}
 				
@@ -348,6 +463,68 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 		}
 	}
 
+	// Add C header functions and enums
+	if doc.CHeaderGlobal != nil {
+		// Add global C functions (snake_case names)
+		for funcName, cFunc := range doc.CHeaderGlobal.Functions {
+			snakeName := ahoy.PascalToSnake(funcName)
+			if prefix == "" || strings.HasPrefix(snakeName, prefix) {
+				// Build parameter list
+				paramList := ""
+				for i, param := range cFunc.Parameters {
+					if i > 0 {
+						paramList += ", "
+					}
+					if param.Name != "" {
+						paramList += param.Name
+					} else {
+						paramList += param.Type
+					}
+				}
+				
+				items = append(items, protocol.CompletionItem{
+					Label:  snakeName,
+					Kind:   protocol.CompletionItemKindFunction,
+					Detail: fmt.Sprintf("%s -> %s", paramList, cFunc.ReturnType),
+				})
+			}
+		}
+		
+		// Add global C enums
+		for enumName := range doc.CHeaderGlobal.Enums {
+			if prefix == "" || strings.HasPrefix(enumName, prefix) {
+				items = append(items, protocol.CompletionItem{
+					Label:  enumName,
+					Kind:   protocol.CompletionItemKindEnumMember,
+					Detail: "C enum",
+				})
+			}
+		}
+		
+		// Add global C defines
+		for defineName := range doc.CHeaderGlobal.Defines {
+			if prefix == "" || strings.HasPrefix(defineName, prefix) {
+				items = append(items, protocol.CompletionItem{
+					Label:  defineName,
+					Kind:   protocol.CompletionItemKindConstant,
+					Detail: "C define",
+				})
+			}
+		}
+		
+		// Add global C structs (lowercase first letter)
+		for structName := range doc.CHeaderGlobal.Structs {
+			lowerName := ahoy.ToLowerFirst(structName)
+			if prefix == "" || strings.HasPrefix(lowerName, prefix) || strings.HasPrefix(structName, prefix) {
+				items = append(items, protocol.CompletionItem{
+					Label:  lowerName,
+					Kind:   protocol.CompletionItemKindStruct,
+					Detail: fmt.Sprintf("C struct %s", structName),
+				})
+			}
+		}
+	}
+	
 	result := protocol.CompletionList{
 		IsIncomplete: false,
 		Items:        items,

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+	"strconv"
 	"strings"
 
 	"ahoy"
@@ -38,6 +40,9 @@ const (
 	SymbolKindStruct
 	SymbolKindStructField
 	SymbolKindConstant
+	SymbolKindCFunction  // C function from imported header
+	SymbolKindCEnum      // C enum from imported header
+	SymbolKindCDefine    // C #define from imported header
 )
 
 // Scope represents a lexical scope
@@ -344,14 +349,40 @@ func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
 			Type:   "enum",
 			Line:   node.Line,
 			Column: 0,
+			Fields: make(map[string]*StructField),
 		}
-		st.AddSymbol(symbol)
 
-		// Add enum values
+		// Add enum values as symbols AND track as fields for completion
+		nextAutoValue := 0
 		for _, child := range node.Children {
 			if child.Type == ahoy.NODE_IDENTIFIER {
+				memberName := child.Value
+				memberValue := child.DataType
+				
+				// Calculate actual value
+				actualValue := ""
+				if memberValue == "" {
+					// Auto-increment value
+					actualValue = fmt.Sprintf("%d", nextAutoValue)
+					nextAutoValue++
+				} else {
+					// Custom value
+					actualValue = memberValue
+					// Try to parse for next auto value
+					if val, err := strconv.Atoi(memberValue); err == nil {
+						nextAutoValue = val + 1
+					}
+				}
+				
+				// Add as field for completion
+				symbol.Fields[memberName] = &StructField{
+					Name: memberName,
+					Type: actualValue,
+				}
+				
+				// Add as enum value symbol
 				valueSymbol := &Symbol{
-					Name:   child.Value,
+					Name:   memberName,
 					Kind:   SymbolKindEnumValue,
 					Type:   enumName,
 					Line:   child.Line,
@@ -360,6 +391,7 @@ func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
 				st.AddSymbol(valueSymbol)
 			}
 		}
+		st.AddSymbol(symbol)
 
 	case ahoy.NODE_STRUCT_DECLARATION:
 		structName := node.Value

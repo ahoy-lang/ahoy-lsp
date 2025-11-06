@@ -133,7 +133,7 @@ func checkStructMemberAccess(doc *Document) []protocol.Diagnostic {
 								} else {
 									// Check type compatibility
 									if len(node.Children) > 0 {
-										actualType := inferExpressionType(node.Children[0])
+										actualType := inferExpressionType(node.Children[0], doc)
 										expectedType := field.Type
 
 										// Allow int->float casting
@@ -279,7 +279,7 @@ func checkObjectPropertyAssignment(doc *Document) []protocol.Diagnostic {
 								} else {
 									// Check type compatibility
 									if len(prop.Children) > 0 {
-										actualType := inferExpressionType(prop.Children[0])
+										actualType := inferExpressionType(prop.Children[0], doc)
 										expectedType := field.Type
 
 										// Allow int->float casting

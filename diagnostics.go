@@ -979,7 +979,7 @@ func checkUndefinedFunctions(doc *Document) []protocol.Diagnostic {
 		return diagnostics
 	}
 
-	// Collect all available function names (built-ins + user-defined)
+	// Collect all available function names (built-ins + user-defined + C imports)
 	availableFuncs := make([]string, 0)
 	availableFuncs = append(availableFuncs, builtinFunctions...)
 
@@ -987,6 +987,14 @@ func checkUndefinedFunctions(doc *Document) []protocol.Diagnostic {
 	for _, sym := range doc.SymbolTable.GlobalScope.Symbols {
 		if sym.Kind == SymbolKindFunction {
 			availableFuncs = append(availableFuncs, sym.Name)
+		}
+	}
+
+	// Add C header functions (global imports - snake_case names)
+	if doc.CHeaderGlobal != nil {
+		for funcName := range doc.CHeaderGlobal.Functions {
+			snakeName := ahoy.PascalToSnake(funcName)
+			availableFuncs = append(availableFuncs, snakeName)
 		}
 	}
 
@@ -1000,10 +1008,26 @@ func checkUndefinedFunctions(doc *Document) []protocol.Diagnostic {
 		if node.Type == ahoy.NODE_CALL {
 			funcName := node.Value
 
-			// Check if function exists (built-in or user-defined)
+			// Check if function exists (built-in or user-defined or C import)
 			if !isBuiltinFunction(funcName) {
 				sym := doc.SymbolTable.GlobalScope.Lookup(funcName)
-				if sym == nil || sym.Kind != SymbolKindFunction {
+				isUserDefined := sym != nil && sym.Kind == SymbolKindFunction
+				
+				// Check if it's a C function (global import)
+				isCFunction := false
+				if doc.CHeaderGlobal != nil {
+					for cFuncName := range doc.CHeaderGlobal.Functions {
+						if ahoy.PascalToSnake(cFuncName) == funcName {
+							isCFunction = true
+							break
+						}
+					}
+				}
+				
+				// Also check namespaced C functions (e.g., rl.function_name)
+				// These would come through as method calls, but we'll handle them separately
+				
+				if !isUserDefined && !isCFunction {
 					// Function not found - find similar function
 					similarFunc, distance := findSimilarFunction(funcName, availableFuncs)
 
@@ -1093,6 +1117,39 @@ func checkUndeclaredIdentifiers(doc *Document) []protocol.Diagnostic {
 			
 			// Look up the identifier in the current scope (searches parent scopes too)
 			sym := scope.Lookup(identifierName)
+			
+			// If not found in symbol table, check C header enums/defines
+			if sym == nil {
+				// Check C header enums and defines
+				foundInCHeader := false
+				if doc.CHeaderGlobal != nil {
+					if _, ok := doc.CHeaderGlobal.Enums[identifierName]; ok {
+						foundInCHeader = true
+					}
+					if _, ok := doc.CHeaderGlobal.Defines[identifierName]; ok {
+						foundInCHeader = true
+					}
+				}
+				
+				// Also check namespaced headers
+				if !foundInCHeader {
+					for _, headerInfo := range doc.CHeaders {
+						if _, ok := headerInfo.Enums[identifierName]; ok {
+							foundInCHeader = true
+							break
+						}
+						if _, ok := headerInfo.Defines[identifierName]; ok {
+							foundInCHeader = true
+							break
+						}
+					}
+				}
+				
+				if foundInCHeader {
+					// Found in C headers, no error
+					sym = &Symbol{Name: identifierName, Kind: SymbolKindCEnum}
+				}
+			}
 			
 			if sym == nil {
 				// Identifier not found
@@ -1273,6 +1330,50 @@ func findFunctionScope(scope *Scope, line int) *Scope {
 	return nil
 }
 
+// inferArgType attempts to infer the type of an argument node
+func inferArgType(node *ahoy.ASTNode) string {
+	if node == nil {
+		return "unknown"
+	}
+	
+	switch node.Type {
+	case ahoy.NODE_NUMBER:
+		// Check if it's float or int based on value
+		if strings.Contains(node.Value, ".") {
+			return "float"
+		}
+		return "int"
+	case ahoy.NODE_STRING:
+		return "string"
+	case ahoy.NODE_BOOLEAN:
+		return "bool"
+	case ahoy.NODE_IDENTIFIER:
+		// Could look up in symbol table, but for now return identifier type if available
+		if node.DataType != "" {
+			return mapCTypeToAhoyType(node.DataType)
+		}
+		return "identifier"
+	case ahoy.NODE_ARRAY_LITERAL:
+		return "array"
+	case ahoy.NODE_DICT_LITERAL:
+		return "dict"
+	case ahoy.NODE_OBJECT_LITERAL:
+		// Return the struct type if available (Value holds the struct type name)
+		if node.Value != "" {
+			return strings.ToLower(node.Value)
+		}
+		if node.DataType != "" {
+			return strings.ToLower(node.DataType)
+		}
+		return "object"
+	default:
+		if node.DataType != "" {
+			return mapCTypeToAhoyType(node.DataType)
+		}
+		return "unknown"
+	}
+}
+
 // checkFunctionCallArgumentCounts checks if function calls have the correct number of arguments
 func checkFunctionCallArgumentCounts(doc *Document) []protocol.Diagnostic {
 	diagnostics := []protocol.Diagnostic{}
@@ -1323,6 +1424,48 @@ func checkFunctionCallArgumentCounts(doc *Document) []protocol.Diagnostic {
 	}
 
 	collectFunctions(doc.AST)
+	
+	// Add C function signatures from imported headers
+	if doc.CHeaderGlobal != nil {
+		for cFuncName, cFunc := range doc.CHeaderGlobal.Functions {
+			snakeName := ahoy.PascalToSnake(cFuncName)
+			sig := &FunctionSignature{
+				Name:          snakeName,
+				ReturnType:    cFunc.ReturnType,
+				RequiredParams: len(cFunc.Parameters),
+				TotalParams:   len(cFunc.Parameters),
+			}
+			for _, param := range cFunc.Parameters {
+				sig.Parameters = append(sig.Parameters, ParameterInfo{
+					Name:       param.Name,
+					Type:       param.Type,
+					HasDefault: false,
+				})
+			}
+			funcSignatures[snakeName] = sig
+		}
+	}
+	
+	// Add namespaced C functions
+	for _, headerInfo := range doc.CHeaders {
+		for cFuncName, cFunc := range headerInfo.Functions {
+			snakeName := ahoy.PascalToSnake(cFuncName)
+			sig := &FunctionSignature{
+				Name:          snakeName,
+				ReturnType:    cFunc.ReturnType,
+				RequiredParams: len(cFunc.Parameters),
+				TotalParams:   len(cFunc.Parameters),
+			}
+			for _, param := range cFunc.Parameters {
+				sig.Parameters = append(sig.Parameters, ParameterInfo{
+					Name:       param.Name,
+					Type:       param.Type,
+					HasDefault: false,
+				})
+			}
+			funcSignatures[snakeName] = sig
+		}
+	}
 
 	var checkCalls func(*ahoy.ASTNode)
 	checkCalls = func(node *ahoy.ASTNode) {
@@ -1338,30 +1481,52 @@ func checkFunctionCallArgumentCounts(doc *Document) []protocol.Diagnostic {
 				expectedMin := sig.RequiredParams
 				expectedMax := sig.TotalParams
 
+				// Build expected types string
+				expectedTypes := "["
+				for i, param := range sig.Parameters {
+					if i > 0 {
+						expectedTypes += ","
+					}
+					expectedTypes += param.Type
+				}
+				expectedTypes += "]"
+				
+				// Build actual types string (approximation based on arg nodes)
+				actualTypes := "["
+				for i, arg := range node.Children {
+					if i > 0 {
+						actualTypes += ","
+					}
+					// Try to infer type from argument
+					argType := inferExpressionType(arg, doc)
+					actualTypes += argType
+				}
+				actualTypes += "]"
+
 				message := ""
 				if argCount < expectedMin {
 					if expectedMin == expectedMax {
 						if expectedMin == 0 {
 							message = "expected no arguments, got " + intToString(argCount)
 						} else if expectedMin == 1 {
-							message = "expected 1 argument, got none"
+							message = "expected 1 argument " + expectedTypes + ", got none"
 						} else {
-							message = "expected " + intToString(expectedMin) + " arguments, got " + intToString(argCount)
+							message = "expected " + intToString(expectedMin) + " arguments " + expectedTypes + ", got " + intToString(argCount) + " " + actualTypes
 						}
 					} else {
 						message = "expected " + intToString(expectedMin) + "-" + intToString(expectedMax) +
-							" arguments, got " + intToString(argCount)
+							" arguments " + expectedTypes + ", got " + intToString(argCount) + " " + actualTypes
 					}
 				} else if argCount > expectedMax {
 					if expectedMin == expectedMax {
 						if expectedMax == 1 {
-							message = "expected 1 argument, got " + intToString(argCount)
+							message = "expected 1 argument " + expectedTypes + ", got " + intToString(argCount) + " " + actualTypes
 						} else {
-							message = "expected " + intToString(expectedMax) + " arguments, got " + intToString(argCount)
+							message = "expected " + intToString(expectedMax) + " arguments " + expectedTypes + ", got " + intToString(argCount) + " " + actualTypes
 						}
 					} else {
 						message = "expected " + intToString(expectedMin) + "-" + intToString(expectedMax) +
-							" arguments, got " + intToString(argCount)
+							" arguments " + expectedTypes + ", got " + intToString(argCount) + " " + actualTypes
 					}
 				}
 
@@ -1456,6 +1621,51 @@ func checkFunctionCallArgumentTypes(doc *Document) []protocol.Diagnostic {
 
 	collectFunctions(doc.AST)
 
+	// Add C imported functions (global)
+	if doc.CHeaderGlobal != nil {
+		for cFuncName, cFunc := range doc.CHeaderGlobal.Functions {
+			snakeName := ahoy.PascalToSnake(cFuncName)
+			sig := &FunctionSignature{
+				Name:           snakeName,
+				ReturnType:     cFunc.ReturnType,
+				RequiredParams: len(cFunc.Parameters),
+				TotalParams:    len(cFunc.Parameters),
+			}
+			for _, param := range cFunc.Parameters {
+				// Map C types to Ahoy types
+				ahoyType := mapCTypeToAhoyType(param.Type)
+				sig.Parameters = append(sig.Parameters, ParameterInfo{
+					Name:       param.Name,
+					Type:       ahoyType,
+					HasDefault: false,
+				})
+			}
+			funcSignatures[snakeName] = sig
+		}
+	}
+
+	// Add C imported functions (namespaced)
+	for _, cHeader := range doc.CHeaders {
+		for cFuncName, cFunc := range cHeader.Functions {
+			snakeName := ahoy.PascalToSnake(cFuncName)
+			sig := &FunctionSignature{
+				Name:           snakeName,
+				ReturnType:     cFunc.ReturnType,
+				RequiredParams: len(cFunc.Parameters),
+				TotalParams:    len(cFunc.Parameters),
+			}
+			for _, param := range cFunc.Parameters {
+				ahoyType := mapCTypeToAhoyType(param.Type)
+				sig.Parameters = append(sig.Parameters, ParameterInfo{
+					Name:       param.Name,
+					Type:       ahoyType,
+					HasDefault: false,
+				})
+			}
+			funcSignatures[snakeName] = sig
+		}
+	}
+
 	var checkCalls func(*ahoy.ASTNode)
 	checkCalls = func(node *ahoy.ASTNode) {
 		if node == nil {
@@ -1486,9 +1696,99 @@ func checkFunctionCallArgumentTypes(doc *Document) []protocol.Diagnostic {
 					}
 
 					// Infer actual types from arguments
-					for _, arg := range node.Children {
-						actualType := inferExpressionType(arg)
+					for i, arg := range node.Children {
+						actualType := inferExpressionType(arg, doc)
 						actualTypes = append(actualTypes, actualType)
+						
+						// Additional validation for object literals passed to functions
+						if arg.Type == ahoy.NODE_OBJECT_LITERAL && i < len(expectedTypes) {
+							expectedType := expectedTypes[i]
+							// Get the actual struct type from the object literal's Value field
+							actualStructType := strings.ToLower(arg.Value)
+							
+							// Check if the object literal has the correct properties for struct types
+							if expectedType != "object" && expectedType != "unknown" && expectedType != "" {
+								// Check C structs
+								if doc.CHeaderGlobal != nil {
+									for cStructName, cStruct := range doc.CHeaderGlobal.Structs {
+										if strings.ToLower(cStructName) == actualStructType {
+											// Validate object properties against C struct fields
+											objectProps := make(map[string]bool)
+											expectedProps := []string{}
+											
+											for _, field := range cStruct.Fields {
+												expectedProps = append(expectedProps, field.Name)
+											}
+											
+											for _, prop := range arg.Children {
+												if prop.Type == ahoy.NODE_OBJECT_PROPERTY {
+													objectProps[prop.Value] = true
+												}
+											}
+											
+											// Check if all expected properties are present
+											actualProps := []string{}
+											for prop := range objectProps {
+												actualProps = append(actualProps, prop)
+											}
+											
+											// Compare properties
+											if len(expectedProps) > 0 && len(actualProps) > 0 {
+												propsMatch := true
+												if len(expectedProps) != len(actualProps) {
+													propsMatch = false
+												} else {
+													expectedPropsMap := make(map[string]bool)
+													for _, p := range expectedProps {
+														expectedPropsMap[p] = true
+													}
+													for _, p := range actualProps {
+														if !expectedPropsMap[p] {
+															propsMatch = false
+															break
+														}
+													}
+												}
+												
+												if !propsMatch {
+													expectedPropsStr := strings.Join(expectedProps, ",")
+													actualPropsStr := strings.Join(actualProps, ",")
+													message := "Object properties mismatch: expected " + expectedPropsStr + " got " + actualPropsStr
+													
+													lineText := ""
+													if node.Line > 0 && node.Line <= len(doc.Lines) {
+														lineText = doc.Lines[node.Line-1]
+													}
+													endChar := uint32(len(lineText))
+													if endChar == 0 {
+														endChar = uint32(len(funcName) + 10)
+													}
+													
+													diagnostic := protocol.Diagnostic{
+														Range: protocol.Range{
+															Start: protocol.Position{
+																Line:      uint32(node.Line - 1),
+																Character: 0,
+															},
+															End: protocol.Position{
+																Line:      uint32(node.Line - 1),
+																Character: endChar,
+															},
+														},
+														Severity: protocol.DiagnosticSeverityError,
+														Source:   "ahoy",
+														Message:  message,
+														Code:     "object-property-mismatch",
+													}
+													diagnostics = append(diagnostics, diagnostic)
+												}
+											}
+											break
+										}
+									}
+								}
+							}
+						}
 					}
 
 					// Check for type mismatches
@@ -1497,8 +1797,20 @@ func checkFunctionCallArgumentTypes(doc *Document) []protocol.Diagnostic {
 						expected := expectedTypes[i]
 						actual := actualTypes[i]
 
-						// Skip if either type is unknown
-						if expected == "" || expected == "unknown" || actual == "unknown" {
+						// Skip if either type is unknown, generic, or infer
+						if expected == "" || expected == "unknown" || actual == "unknown" ||
+							expected == "generic" || actual == "generic" ||
+							expected == "infer" || actual == "infer" {
+							continue
+						}
+						
+						// Allow int->float implicit conversion
+						if expected == "float" && actual == "int" {
+							continue
+						}
+						
+						// Allow string to match char (C char* can accept string literals)
+						if expected == "char" && actual == "string" {
 							continue
 						}
 
@@ -1514,7 +1826,7 @@ func checkFunctionCallArgumentTypes(doc *Document) []protocol.Diagnostic {
 						expectedStr := "["
 						for i, t := range expectedTypes {
 							if i > 0 {
-								expectedStr += ", "
+								expectedStr += ","
 							}
 							if t == "" {
 								expectedStr += "unknown"
@@ -1527,13 +1839,13 @@ func checkFunctionCallArgumentTypes(doc *Document) []protocol.Diagnostic {
 						actualStr := "["
 						for i, t := range actualTypes {
 							if i > 0 {
-								actualStr += ", "
+								actualStr += ","
 							}
 							actualStr += t
 						}
 						actualStr += "]"
 
-						message := "expected function arguments " + expectedStr + " got " + actualStr
+						message := "Argument type mismatch: expected " + expectedStr + ", got " + actualStr
 
 						lineText := ""
 						if node.Line > 0 && node.Line <= len(doc.Lines) {
@@ -1632,7 +1944,7 @@ func checkTypeMismatches(doc *Document) []protocol.Diagnostic {
 			expectedType := node.DataType
 
 			if len(node.Children) > 0 {
-				actualType := inferExpressionType(node.Children[0])
+				actualType := inferExpressionType(node.Children[0], doc)
 
 				if actualType != "unknown" && actualType != expectedType && expectedType != "generic" {
 					lineText := ""
@@ -1671,7 +1983,7 @@ func checkTypeMismatches(doc *Document) []protocol.Diagnostic {
 			expectedType := node.DataType
 
 			if len(node.Children) > 0 {
-				actualType := inferExpressionType(node.Children[0])
+				actualType := inferExpressionType(node.Children[0], doc)
 
 				if actualType != "unknown" && actualType != expectedType && expectedType != "generic" {
 					lineText := ""
@@ -1715,7 +2027,7 @@ func checkTypeMismatches(doc *Document) []protocol.Diagnostic {
 }
 
 // inferExpressionType infers the type of an expression
-func inferExpressionType(node *ahoy.ASTNode) string {
+func inferExpressionType(node *ahoy.ASTNode, doc *Document) string {
 	if node == nil {
 		return "unknown"
 	}
@@ -1746,18 +2058,113 @@ func inferExpressionType(node *ahoy.ASTNode) string {
 		return "dict"
 
 	case ahoy.NODE_IDENTIFIER:
-		// Could look up in symbol table, for now return unknown
+		// Look up the identifier in the symbol table
+		if doc != nil && doc.SymbolTable != nil && doc.SymbolTable.GlobalScope != nil {
+			if sym := doc.SymbolTable.GlobalScope.Lookup(node.Value); sym != nil {
+				return sym.Type
+			}
+		}
+		
+		// Check if it's a C #define constant
+		if doc != nil && doc.CHeaderGlobal != nil {
+			if define, exists := doc.CHeaderGlobal.Defines[node.Value]; exists {
+				// Try to extract type from the define value
+				// e.g., "CLITERAL(Color){ ... }" -> "color"
+				return extractTypeFromDefine(define.Value)
+			}
+		}
+		
+		// Check namespaced C headers
+		if doc != nil {
+			for _, cHeader := range doc.CHeaders {
+				if define, exists := cHeader.Defines[node.Value]; exists {
+					return extractTypeFromDefine(define.Value)
+				}
+			}
+		}
+		
 		return "unknown"
 
 	case ahoy.NODE_CALL:
-		// Could look up function return type, for now return unknown
+		// Look up function return type and infer from arguments if needed
+		funcName := node.Value
+		
+		// Build function signatures map if not already done
+		funcSignatures := make(map[string]*FunctionSignature)
+		if doc != nil && doc.AST != nil {
+			var collectFunctions func(*ahoy.ASTNode)
+			collectFunctions = func(n *ahoy.ASTNode) {
+				if n == nil {
+					return
+				}
+				if n.Type == ahoy.NODE_FUNCTION {
+					sig := &FunctionSignature{
+						Name:       n.Value,
+						ReturnType: n.DataType,
+					}
+					if len(n.Children) > 0 && n.Children[0].Type == ahoy.NODE_BLOCK {
+						params := n.Children[0]
+						for _, param := range params.Children {
+							if param.Type == ahoy.NODE_IDENTIFIER {
+								paramInfo := ParameterInfo{
+									Name:       param.Value,
+									Type:       param.DataType,
+									HasDefault: param.DefaultValue != nil,
+								}
+								sig.Parameters = append(sig.Parameters, paramInfo)
+							}
+						}
+					}
+					funcSignatures[n.Value] = sig
+				}
+				for _, child := range n.Children {
+					collectFunctions(child)
+				}
+			}
+			collectFunctions(doc.AST)
+		}
+		
+		// Look up the function
+		if sig, exists := funcSignatures[funcName]; exists {
+			returnType := sig.ReturnType
+			
+			// If return type is "infer" or empty (generic), infer from arguments
+			if returnType == "infer" || returnType == "" || returnType == "generic" {
+				// For infer/generic returns, we need to trace through the function body
+				// to determine what's actually returned based on the argument types
+				// For now, we'll look at the arguments to infer parameter types
+				if len(node.Children) > 0 {
+					// Infer parameter types from actual arguments
+					inferredParamTypes := make(map[string]string)
+					for i, arg := range node.Children {
+						if i < len(sig.Parameters) {
+							paramName := sig.Parameters[i].Name
+							paramType := sig.Parameters[i].Type
+							
+							// If parameter type is empty/generic, infer from argument
+							if paramType == "" || paramType == "generic" {
+								argType := inferExpressionType(arg, doc)
+								inferredParamTypes[paramName] = argType
+							}
+						}
+					}
+					
+					// Now we'd need to trace through the function body with inferred types
+					// This is complex - for now return "infer" to indicate it needs inference
+					return "infer"
+				}
+			}
+			
+			return returnType
+		}
+		
 		return "unknown"
 
 	case ahoy.NODE_BINARY_OP:
 		// Infer based on operands
 		if len(node.Children) >= 2 {
-			leftType := inferExpressionType(node.Children[0])
-			rightType := inferExpressionType(node.Children[1])
+			leftType := inferExpressionType(node.Children[0], doc)
+			rightType := inferExpressionType(node.Children[1], doc)
 
 			// Arithmetic operations
 			if node.Value == "+" || node.Value == "-" || node.Value == "*" || node.Value == "/" || node.Value == "%" {
@@ -1781,7 +2188,90 @@ func inferExpressionType(node *ahoy.ASTNode) string {
 		// Return type depends on array element type - unknown for now
 		return "unknown"
 
+	case ahoy.NODE_OBJECT_LITERAL:
+		// Check if it has a struct type name in Value (e.g., rectangle, vector2)
+		if node.Value != "" {
+			return strings.ToLower(node.Value)
+		}
+		// Fallback to DataType if Value is not set
+		if node.DataType != "" {
+			return node.DataType
+		}
+		return "object"
+
 	default:
 		return "unknown"
 	}
+}
+
+// mapCTypeToAhoyType maps C types to Ahoy types
+func mapCTypeToAhoyType(cType string) string {
+	// Trim spaces and pointer/const qualifiers
+	cType = strings.TrimSpace(cType)
+	cType = strings.TrimPrefix(cType, "const ")
+	cType = strings.TrimSpace(cType)
+	
+	// Handle pointers to types (like char* for string)
+	if strings.Contains(cType, "char") && strings.Contains(cType, "*") {
+		return "string"
+	}
+	
+	// Remove pointer notation for other types
+	cType = strings.ReplaceAll(cType, "*", "")
+	cType = strings.TrimSpace(cType)
+	
+	switch cType {
+	case "int", "short", "long", "unsigned int", "unsigned short", "unsigned long",
+		"int8_t", "int16_t", "int32_t", "int64_t",
+		"uint8_t", "uint16_t", "uint32_t", "uint64_t",
+		"size_t":
+		return "int"
+	case "float", "double":
+		return "float"
+	case "char":
+		return "char"
+	case "bool", "_Bool":
+		return "bool"
+	case "void":
+		return "void"
+	default:
+		// Check if it's a struct type (starts with uppercase or is a known type)
+		if len(cType) > 0 && cType[0] >= 'A' && cType[0] <= 'Z' {
+			// It's likely a struct type, return as lowercase for matching
+			return strings.ToLower(cType)
+		}
+		return cType
+	}
+}
+
+// extractTypeFromDefine extracts type information from a C #define value
+// e.g., "CLITERAL(Color){ 80, 80, 80, 255 }" -> "color"
+func extractTypeFromDefine(defineValue string) string {
+	// Look for CLITERAL(Type) pattern
+	if strings.Contains(defineValue, "CLITERAL(") {
+		start := strings.Index(defineValue, "CLITERAL(") + len("CLITERAL(")
+		end := strings.Index(defineValue[start:], ")")
+		if end > 0 {
+			typeName := strings.TrimSpace(defineValue[start : start+end])
+			return strings.ToLower(typeName)
+		}
+	}
+	
+	// Look for (Type){ ... } pattern
+	if strings.Contains(defineValue, ")(") || strings.Contains(defineValue, "){") {
+		// Try to extract type from cast pattern like (Color){ ... }
+		start := strings.Index(defineValue, "(")
+		if start >= 0 {
+			end := strings.Index(defineValue[start+1:], ")")
+			if end > 0 {
+				typeName := strings.TrimSpace(defineValue[start+1 : start+1+end])
+				// Check if it looks like a type name (starts with uppercase)
+				if len(typeName) > 0 && typeName[0] >= 'A' && typeName[0] <= 'Z' {
+					return strings.ToLower(typeName)
+				}
+			}
+		}
+	}
+	
+	return "unknown"
 }
