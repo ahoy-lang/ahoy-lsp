@@ -12,21 +12,26 @@ tekk::[32]
 tekkst::9
 test:"kjklkjlk"
 
-print|BOB|
 ? Valid function
-greet :: | name:string | :
+greet :: | name:string |:
 	ahoy|f"Hello, {}"|
+	ahoy|f"Hello, {}"|
+	ahoy|f"Hello, {}"|
+	ahoy|f"Hello, {}"|
+end
 
-greet2 :: |name:int| void:
+greet2 :: | name:int | void:
 	ahoy|"Hello,"|
+end
 
 ? if greet3.length|| > 10 then print |"hello"|
 
 ? Valid loop
 loop i: 0 to 10 do
 	print|"Hello"|
-	? |i| loop from 1 to 10:
-	? 	ahoy|j|
+end
+? |i| loop from 1 to 10:
+? 	ahoy|j|
 
 ? Valid if statement
 x: 42
@@ -49,21 +54,18 @@ switch possible_color on
   "blue" : ahoy|"Blue color"|
   "green" :ahoy|"jkljlk"|
   _: ahoy |"Unknown color"|
+end
 
 
-struct point:
-	x:float
-	time:int
-	type smoke_particle:
-		y: int
+struct point: x:float time:int type smoke_particle: y: int
 ? Enum declaration
 
 enum examp:
 	ONE
-	TWO
-	THREE
+	TWO THREE
+end
 
-lkjlkj :: |test:string|: print|"This is a test"|
+bobkkk :: |test:string|: print|"This is a test"|
 
 ? Test operators
 result: 5 plus 3
@@ -94,7 +96,7 @@ first: object_numbers{"one"} ? linter	error "invalid object access syntax, use o
 first: object_numbers<"one"> ? valid syntax no compiler error
 first: object_numbers<"one"> ? valid syntax no compiler error
 
-object_numbers: <one:"one", two:"two", three:"three", four:"four", five:"five"> ? fyi this is an object literal not an array literal
+object_numbers : <one:"one", two:"two", three:"three", four:"four", five:"five"> ? fyi this is an object literal not an array literal
 
 object_numbers: <1:"one", 2:"two", 3:"three", 4:"four", 5:"five"> ? should give linter error	 "object keys must be strings"
 first: object_numbers.one ? valid syntax should not give compiler error fives use of undecalered variable
@@ -102,8 +104,8 @@ first: object_numbers.one ? valid syntax should not give compiler error fives us
 numbersk: {1:9, 2, 3, 4, 5}
 
 first: numbers[0] ? linter error "invalid dict access syntax, use dict{} instead of array[]"
-first: numbers{0} ? valid syntax no compiler error
-first: numbers<0> ? linter error "invalid dict access syntax, use dict{} instead of object<>"
+first2: numbers{0} ? valid syntax no compiler error
+first3: numbers<0> ? linter error "invalid dict access syntax, use dict{} instead of object<>"
 
 ? Dictionary
 ? person: {"name": "Alice", "age": 30}
@@ -121,6 +123,7 @@ struct person:
 	age: int
 	type dwarf:
 		height:int
+end
 
 
 person: <name: "Alice", age: 30, height: 12> ? would be inferred as person.dwarf type
