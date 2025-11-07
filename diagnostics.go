@@ -1123,21 +1123,35 @@ func checkUndeclaredIdentifiers(doc *Document) []protocol.Diagnostic {
 				// Check C header enums and defines
 				foundInCHeader := false
 				if doc.CHeaderGlobal != nil {
-					if _, ok := doc.CHeaderGlobal.Enums[identifierName]; ok {
-						foundInCHeader = true
+					// Check if it's an enum VALUE (not enum name)
+					for _, enum := range doc.CHeaderGlobal.Enums {
+						if _, ok := enum.Values[identifierName]; ok {
+							foundInCHeader = true
+							break
+						}
 					}
-					if _, ok := doc.CHeaderGlobal.Defines[identifierName]; ok {
-						foundInCHeader = true
+					// Check defines
+					if !foundInCHeader {
+						if _, ok := doc.CHeaderGlobal.Defines[identifierName]; ok {
+							foundInCHeader = true
+						}
 					}
 				}
 				
 				// Also check namespaced headers
 				if !foundInCHeader {
 					for _, headerInfo := range doc.CHeaders {
-						if _, ok := headerInfo.Enums[identifierName]; ok {
-							foundInCHeader = true
+						// Check enum values
+						for _, enum := range headerInfo.Enums {
+							if _, ok := enum.Values[identifierName]; ok {
+								foundInCHeader = true
+								break
+							}
+						}
+						if foundInCHeader {
 							break
 						}
+						// Check defines
 						if _, ok := headerInfo.Defines[identifierName]; ok {
 							foundInCHeader = true
 							break

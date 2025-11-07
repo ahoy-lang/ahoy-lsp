@@ -50,21 +50,36 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 			}
 		}
 		
-		// Check if it's a C enum or define
-		if cEnum, ok := doc.CHeaderGlobal.Enums[word]; ok {
-			for _, child := range doc.AST.Children {
-				if child.Type == ahoy.NODE_IMPORT_STATEMENT && strings.HasSuffix(child.Value, ".h") {
-					location := protocol.Location{
-						URI: protocol.URI("file://" + child.Value),
-						Range: protocol.Range{
-							Start: protocol.Position{Line: uint32(cEnum.Line - 1), Character: 0},
-							End:   protocol.Position{Line: uint32(cEnum.Line - 1), Character: 100},
-						},
+		// Check if it's a C enum VALUE (not enum name)
+		foundEnumValue := false
+		var enumLineNum int
+		var enumHeaderPath string
+		
+		for _, cEnum := range doc.CHeaderGlobal.Enums {
+			if _, ok := cEnum.Values[word]; ok {
+				foundEnumValue = true
+				enumLineNum = cEnum.Line
+				// Find the header file path from imports
+				for _, child := range doc.AST.Children {
+					if child.Type == ahoy.NODE_IMPORT_STATEMENT && strings.HasSuffix(child.Value, ".h") {
+						enumHeaderPath = child.Value
+						break
 					}
-					debugLog.Printf("Go to definition: C enum %s -> %s:%d", word, child.Value, cEnum.Line)
-					return reply(ctx, location, nil)
 				}
+				break
 			}
+		}
+		
+		if foundEnumValue && enumHeaderPath != "" {
+			location := protocol.Location{
+				URI: protocol.URI("file://" + enumHeaderPath),
+				Range: protocol.Range{
+					Start: protocol.Position{Line: uint32(enumLineNum - 1), Character: 0},
+					End:   protocol.Position{Line: uint32(enumLineNum - 1), Character: 100},
+				},
+			}
+			debugLog.Printf("Go to definition: C enum value %s -> %s:%d", word, enumHeaderPath, enumLineNum)
+			return reply(ctx, location, nil)
 		}
 		
 		if cDefine, ok := doc.CHeaderGlobal.Defines[word]; ok {

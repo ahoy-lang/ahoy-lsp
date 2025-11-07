@@ -490,14 +490,16 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 			}
 		}
 		
-		// Add global C enums
-		for enumName := range doc.CHeaderGlobal.Enums {
-			if prefix == "" || strings.HasPrefix(enumName, prefix) {
-				items = append(items, protocol.CompletionItem{
-					Label:  enumName,
-					Kind:   protocol.CompletionItemKindEnumMember,
-					Detail: "C enum",
-				})
+		// Add global C enum VALUES (not enum names)
+		for _, enum := range doc.CHeaderGlobal.Enums {
+			for valueName, value := range enum.Values {
+				if prefix == "" || strings.HasPrefix(valueName, prefix) {
+					items = append(items, protocol.CompletionItem{
+						Label:  valueName,
+						Kind:   protocol.CompletionItemKindEnumMember,
+						Detail: fmt.Sprintf("C enum value = %d", value),
+					})
+				}
 			}
 		}
 		

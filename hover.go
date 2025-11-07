@@ -72,13 +72,25 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 			}
 		}
 		
-		// Check C enums
-		if cEnum, ok := doc.CHeaderGlobal.Enums[word]; ok {
-			hoverText := fmt.Sprintf("```c\n%s\n```\n\n", word)
-			hoverText += "**C Enum** from imported header\n\n"
-			if cEnum.Value != "" {
-				hoverText += fmt.Sprintf("Value: `%s`", cEnum.Value)
+		// Check C enum VALUES (not enum names)
+		foundEnumValue := false
+		var enumValueInfo struct {
+			value    int
+			enumName string
+		}
+		for enumName, cEnum := range doc.CHeaderGlobal.Enums {
+			if value, ok := cEnum.Values[word]; ok {
+				foundEnumValue = true
+				enumValueInfo.value = value
+				enumValueInfo.enumName = enumName
+				break
 			}
+		}
+		
+		if foundEnumValue {
+			hoverText := fmt.Sprintf("```c\n%s\n```\n\n", word)
+			hoverText += fmt.Sprintf("**C Enum Value** from %s\n\n", enumValueInfo.enumName)
+			hoverText += fmt.Sprintf("Value: `%d`", enumValueInfo.value)
 			
 			hover := protocol.Hover{
 				Contents: protocol.MarkupContent{
@@ -159,8 +171,16 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 		if cEnum, ok := headerInfo.Enums[word]; ok {
 			hoverText := fmt.Sprintf("```c\n%s\n```\n\n", word)
 			hoverText += "**C Enum** from namespaced import\n\n"
-			if cEnum.Value != "" {
-				hoverText += fmt.Sprintf("Value: `%s`", cEnum.Value)
+			if len(cEnum.Values) > 0 {
+				hoverText += "Values: "
+				first := true
+				for name := range cEnum.Values {
+					if !first {
+						hoverText += ", "
+					}
+					hoverText += fmt.Sprintf("`%s`", name)
+					first = false
+				}
 			}
 			
 			hover := protocol.Hover{
