@@ -199,44 +199,9 @@ func checkConstReassignment(doc *Document) []protocol.Diagnostic {
 	}
 
 	// Walk the AST looking for assignments
-	var checkNode func(*ahoy.ASTNode, int)
-	checkNode = func(node *ahoy.ASTNode, depth int) {
+	var checkNode func(*ahoy.ASTNode)
+	checkNode = func(node *ahoy.ASTNode) {
 		if node == nil {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
 			return
 		}
 
@@ -355,11 +320,11 @@ func checkConstReassignment(doc *Document) []protocol.Diagnostic {
 
 		// Recursively check children
 		for _, child := range node.Children {
-			checkNode(child, depth+1)
+			checkNode(child)
 		}
 	}
 
-	checkNode(doc.AST, 0)
+	checkNode(doc.AST)
 	return diagnostics
 }
 
@@ -372,44 +337,9 @@ func checkConstMethodCalls(doc *Document) []protocol.Diagnostic {
 	}
 
 	// Walk the AST looking for method calls and member accesses
-	var checkNode func(*ahoy.ASTNode, int)
-	checkNode = func(node *ahoy.ASTNode, depth int) {
+	var checkNode func(*ahoy.ASTNode)
+	checkNode = func(node *ahoy.ASTNode) {
 		if node == nil {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
 			return
 		}
 
@@ -458,11 +388,11 @@ func checkConstMethodCalls(doc *Document) []protocol.Diagnostic {
 
 		// Recursively check children
 		for _, child := range node.Children {
-			checkNode(child, depth+1)
+			checkNode(child)
 		}
 	}
 
-	checkNode(doc.AST, 0)
+	checkNode(doc.AST)
 	return diagnostics
 }
 
@@ -500,44 +430,9 @@ func checkInvalidMethodCalls(doc *Document) []protocol.Diagnostic {
 	}
 
 	// Walk the AST looking for method calls
-	var checkNode func(*ahoy.ASTNode, int)
-	checkNode = func(node *ahoy.ASTNode, depth int) {
+	var checkNode func(*ahoy.ASTNode)
+	checkNode = func(node *ahoy.ASTNode) {
 		if node == nil {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
 			return
 		}
 
@@ -579,7 +474,7 @@ func checkInvalidMethodCalls(doc *Document) []protocol.Diagnostic {
 				default:
 					// Unknown type, skip validation
 					for _, child := range node.Children {
-						checkNode(child, depth+1)
+						checkNode(child)
 					}
 					return
 				}
@@ -652,11 +547,11 @@ func checkInvalidMethodCalls(doc *Document) []protocol.Diagnostic {
 
 		// Recursively check children
 		for _, child := range node.Children {
-			checkNode(child, depth+1)
+			checkNode(child)
 		}
 	}
 
-	checkNode(doc.AST, 0)
+	checkNode(doc.AST)
 	return diagnostics
 }
 
@@ -669,44 +564,9 @@ func checkReturnTypeViolations(doc *Document) []protocol.Diagnostic {
 	}
 
 	// Walk the AST looking for functions
-	var checkNode func(*ahoy.ASTNode, int)
-	checkNode = func(node *ahoy.ASTNode, depth int) {
+	var checkNode func(*ahoy.ASTNode)
+	checkNode = func(node *ahoy.ASTNode) {
 		if node == nil {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
 			return
 		}
 
@@ -846,11 +706,11 @@ func checkReturnTypeViolations(doc *Document) []protocol.Diagnostic {
 
 		// Recursively check children
 		for _, child := range node.Children {
-			checkNode(child, depth+1)
+			checkNode(child)
 		}
 	}
 
-	checkNode(doc.AST, 0)
+	checkNode(doc.AST)
 	return diagnostics
 }
 
@@ -891,44 +751,9 @@ func checkEnumDuplicates(doc *Document) []protocol.Diagnostic {
 	}
 
 	// Walk the AST looking for enums
-	var checkNode func(*ahoy.ASTNode, int)
-	checkNode = func(node *ahoy.ASTNode, depth int) {
+	var checkNode func(*ahoy.ASTNode)
+	checkNode = func(node *ahoy.ASTNode) {
 		if node == nil {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
 			return
 		}
 
@@ -983,11 +808,11 @@ func checkEnumDuplicates(doc *Document) []protocol.Diagnostic {
 
 		// Recursively check children
 		for _, child := range node.Children {
-			checkNode(child, depth+1)
+			checkNode(child)
 		}
 	}
 
-	checkNode(doc.AST, 0)
+	checkNode(doc.AST)
 	return diagnostics
 }
 
@@ -1003,44 +828,9 @@ func checkEnumNameDuplicates(doc *Document) []protocol.Diagnostic {
 	enumMap := make(map[string][]int)
 
 	// Walk the AST looking for enum declarations
-	var checkNode func(*ahoy.ASTNode, int)
-	checkNode = func(node *ahoy.ASTNode, depth int) {
+	var checkNode func(*ahoy.ASTNode)
+	checkNode = func(node *ahoy.ASTNode) {
 		if node == nil {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
 			return
 		}
 
@@ -1053,11 +843,11 @@ func checkEnumNameDuplicates(doc *Document) []protocol.Diagnostic {
 
 		// Recursively check children
 		for _, child := range node.Children {
-			checkNode(child, depth+1)
+			checkNode(child)
 		}
 	}
 
-	checkNode(doc.AST, 0)
+	checkNode(doc.AST)
 
 	// Check for duplicate enum names
 	for enumName, lines := range enumMap {
@@ -1209,44 +999,9 @@ func checkUndefinedFunctions(doc *Document) []protocol.Diagnostic {
 	}
 
 	// Walk the AST looking for function calls
-	var checkNode func(*ahoy.ASTNode, int)
-	checkNode = func(node *ahoy.ASTNode, depth int) {
+	var checkNode func(*ahoy.ASTNode)
+	checkNode = func(node *ahoy.ASTNode) {
 		if node == nil {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
 			return
 		}
 
@@ -1321,11 +1076,11 @@ func checkUndefinedFunctions(doc *Document) []protocol.Diagnostic {
 
 		// Recursively check children
 		for _, child := range node.Children {
-			checkNode(child, depth+1)
+			checkNode(child)
 		}
 	}
 
-	checkNode(doc.AST, 0)
+	checkNode(doc.AST)
 	return diagnostics
 }
 
@@ -1346,44 +1101,9 @@ func checkUndeclaredIdentifiers(doc *Document) []protocol.Diagnostic {
 	scopeStack := []scopeInfo{{scope: doc.SymbolTable.GlobalScope, childIndex: 0}}
 
 	// Walk the AST looking for identifier usage
-	var checkNode func(*ahoy.ASTNode, int)
-	checkNode = func(node *ahoy.ASTNode, depth int) {
+	var checkNode func(*ahoy.ASTNode)
+	checkNode = func(node *ahoy.ASTNode) {
 		if node == nil {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
 			return
 		}
 
@@ -1495,14 +1215,14 @@ func checkUndeclaredIdentifiers(doc *Document) []protocol.Diagnostic {
 		case ahoy.NODE_ASSIGNMENT, ahoy.NODE_VARIABLE_DECLARATION:
 			// For assignments, check the right side but not the left side
 			for i := 1; i < len(node.Children); i++ {
-				checkNode(node.Children[i], depth+1)
+				checkNode(node.Children[i])
 			}
 			return
 
 		case ahoy.NODE_CONSTANT_DECLARATION:
 			// For const declarations, check the right side but not the name
 			for i := 1; i < len(node.Children); i++ {
-				checkNode(node.Children[i], depth+1)
+				checkNode(node.Children[i])
 			}
 			return
 
@@ -1515,7 +1235,7 @@ func checkUndeclaredIdentifiers(doc *Document) []protocol.Diagnostic {
 				
 				// Check function body
 				if len(node.Children) > 1 {
-					checkNode(node.Children[1], depth+1)
+					checkNode(node.Children[1])
 				}
 				
 				scopeStack = scopeStack[:len(scopeStack)-1]
@@ -1551,14 +1271,14 @@ func checkUndeclaredIdentifiers(doc *Document) []protocol.Diagnostic {
 				
 				// Check children with loop scope
 				for i := startIdx; i < len(node.Children); i++ {
-					checkNode(node.Children[i], depth+1)
+					checkNode(node.Children[i])
 				}
 				
 				scopeStack = scopeStack[:len(scopeStack)-1]
 			} else {
 				// No more child scopes, check with current scope
 				for i := 0; i < len(node.Children); i++ {
-					checkNode(node.Children[i], depth+1)
+					checkNode(node.Children[i])
 				}
 			}
 			return
@@ -1568,18 +1288,18 @@ func checkUndeclaredIdentifiers(doc *Document) []protocol.Diagnostic {
 
 		case ahoy.NODE_CALL:
 			for _, child := range node.Children {
-				checkNode(child, depth+1)
+				checkNode(child)
 			}
 			return
 		}
 
 		// Recursively check children
 		for _, child := range node.Children {
-			checkNode(child, depth+1)
+			checkNode(child)
 		}
 	}
 
-	checkNode(doc.AST, 0)
+	checkNode(doc.AST)
 	return diagnostics
 }
 
@@ -2226,44 +1946,9 @@ func checkTypeMismatches(doc *Document) []protocol.Diagnostic {
 		return diagnostics
 	}
 
-	var checkNode func(*ahoy.ASTNode, int)
-	checkNode = func(node *ahoy.ASTNode, depth int) {
+	var checkNode func(*ahoy.ASTNode)
+	checkNode = func(node *ahoy.ASTNode) {
 		if node == nil {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
 			return
 		}
 
@@ -2347,11 +2032,11 @@ func checkTypeMismatches(doc *Document) []protocol.Diagnostic {
 
 		// Recursively check children
 		for _, child := range node.Children {
-			checkNode(child, depth+1)
+			checkNode(child)
 		}
 	}
 
-	checkNode(doc.AST, 0)
+	checkNode(doc.AST)
 	return diagnostics
 }
 

@@ -18,18 +18,18 @@ greet :: | name:string |:
 	ahoy|f"Hello, {}"|
 	ahoy|f"Hello, {}"|
 	ahoy|f"Hello, {}"|
-end
+$
 
 greet2 :: | name:int | void:
 	ahoy|"Hello,"|
-end
+$
 
 ? if greet3.length|| > 10 then print |"hello"|
 
 ? Valid loop
 loop i: 0 to 10 do
 	print|"Hello"|
-end
+$
 ? |i| loop from 1 to 10:
 ? 	ahoy|j|
 
@@ -54,7 +54,7 @@ switch possible_color on
   "blue" : ahoy|"Blue color"|
   "green" :ahoy|"jkljlk"|
   _: ahoy |"Unknown color"|
-end
+$
 
 
 struct point: x:float time:int type smoke_particle: y: int
@@ -63,7 +63,7 @@ struct point: x:float time:int type smoke_particle: y: int
 enum examp:
 	ONE
 	TWO THREE
-end
+$
 
 bobkkk :: |test:string|: print|"This is a test"|
 
@@ -123,7 +123,7 @@ struct person:
 	age: int
 	type dwarf:
 		height:int
-end
+$
 
 
 person: <name: "Alice", age: 30, height: 12> ? would be inferred as person.dwarf type
@@ -137,7 +137,7 @@ test_di:dict= {"name": "Alice", "age": 30}
 
 test_arraay : [299,90]
 test_arraay[0]
-person['name'] : "bob"
+person<'name'> : "bob"
 dict_example:dict= {"name": "Alice", "age": 30}? if we have struct with these explicit properties we infer the type to be person
 person<'name'> : "bob"
 dict_example{"name"} : "charlene"
