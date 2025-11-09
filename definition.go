@@ -191,15 +191,40 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 	}
 
 	// Look up the symbol in the symbol table (for Ahoy symbols)
-	if doc.SymbolTable != nil {
-		symbol := doc.SymbolTable.Lookup(word)
-		if symbol == nil {
-			return reply(ctx, nil, nil)
+	// Use PackageSymbols if available (for multi-file packages), otherwise use regular SymbolTable
+	var symbolTable *SymbolTable
+	var symbol *Symbol
+	
+	if doc.PackageSymbols != nil {
+		symbolTable = doc.PackageSymbols
+		symbol = symbolTable.Lookup(word)
+	} else if doc.SymbolTable != nil {
+		symbolTable = doc.SymbolTable
+		symbol = symbolTable.Lookup(word)
+	}
+	
+	if symbol != nil {
+		// Find which file contains this symbol (check package files)
+		targetURI := params.TextDocument.URI
+		
+		// If we found the symbol in package symbols, check which file it's actually from
+		if doc.PackageSymbols != nil && doc.PackageFiles != nil {
+			// First check if it's in a package file
+			for pkgURI, pkgFile := range doc.PackageFiles {
+				if pkgFile.Symbols != nil {
+					if pkgSym := pkgFile.Symbols.Lookup(word); pkgSym != nil {
+						// Found in package file
+						targetURI = pkgURI
+						symbol = pkgSym
+						break
+					}
+				}
+			}
 		}
-
+		
 		// Return the definition location
 		location := protocol.Location{
-			URI: params.TextDocument.URI,
+			URI: targetURI,
 			Range: protocol.Range{
 				Start: protocol.Position{
 					Line:      uint32(symbol.Line - 1),
@@ -212,6 +237,7 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 			},
 		}
 
+		debugLog.Printf("Go to definition: %s -> %s:%d", word, targetURI, symbol.Line)
 		return reply(ctx, location, nil)
 	}
 

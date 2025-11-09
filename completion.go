@@ -234,11 +234,19 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 			return reply(ctx, protocol.CompletionList{IsIncomplete: false, Items: items}, nil)
 		}
 		
-		// Build symbol table to look up the type
-		if doc.AST != nil {
-			symbolTable := BuildSymbolTable(doc.AST)
+		// Get symbol table to look up the type
+		// Use PackageSymbols if available (for multi-file packages), otherwise use regular SymbolTable
+		var symbolTable *SymbolTable
+		if doc.PackageSymbols != nil {
+			symbolTable = doc.PackageSymbols
+		} else if doc.SymbolTable != nil {
+			symbolTable = doc.SymbolTable
+		} else if doc.AST != nil {
+			symbolTable = BuildSymbolTable(doc.AST)
 			defer symbolTable.Clear()
-			
+		}
+		
+		if symbolTable != nil {
 			// Look up the variable/identifier before the dot
 			if sym := symbolTable.Lookup(beforePrefix); sym != nil {
 				// Don't provide method completions for constants
@@ -400,16 +408,33 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 	}
 
 	// Add function completions from symbol table
-	if doc.AST != nil {
-		symbolTable := BuildSymbolTable(doc.AST)
+	// Use PackageSymbols if available (for multi-file packages), otherwise use regular SymbolTable
+	var symbolTable *SymbolTable
+	if doc.PackageSymbols != nil {
+		symbolTable = doc.PackageSymbols
+	} else if doc.SymbolTable != nil {
+		symbolTable = doc.SymbolTable
+	} else if doc.AST != nil {
+		symbolTable = BuildSymbolTable(doc.AST)
 		defer symbolTable.Clear()
+	}
 
+	if symbolTable != nil {
 		// Add user-defined functions
 		for _, sym := range symbolTable.GlobalScope.Symbols {
 			if sym.Kind == SymbolKindFunction {
 				if prefix == "" || strings.HasPrefix(sym.Name, prefix) {
-					// Build function signature for detail
-					detail := "func"
+					// Build function signature: name(param:type, ...) -> returnType
+					params := []string{}
+					for _, param := range sym.Parameters {
+						paramStr := param.Name
+						if param.Type != "" && param.Type != "generic" {
+							paramStr += ":" + param.Type
+						}
+						params = append(params, paramStr)
+					}
+					
+					detail := sym.Name + "(" + strings.Join(params, ", ") + ")"
 					if sym.Type != "" && sym.Type != "void" {
 						detail += " -> " + sym.Type
 					}

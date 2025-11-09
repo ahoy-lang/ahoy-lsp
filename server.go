@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -16,16 +17,26 @@ import (
 )
 
 type Document struct {
-	URI           uri.URI
-	Content       string
-	Lines         []string // Cached split lines
-	Version       int32
-	Tokens        []ahoy.Token
-	AST           *ahoy.ASTNode
-	Errors        []ahoy.ParseError
-	SymbolTable   *SymbolTable
-	CHeaders      map[string]*ahoy.CHeaderInfo // namespace -> C header info
-	CHeaderGlobal *ahoy.CHeaderInfo             // Global C header imports
+	URI            uri.URI
+	Content        string
+	Lines          []string // Cached split lines
+	Version        int32
+	Tokens         []ahoy.Token
+	AST            *ahoy.ASTNode
+	Errors         []ahoy.ParseError
+	SymbolTable    *SymbolTable
+	CHeaders       map[string]*ahoy.CHeaderInfo // namespace -> C header info
+	CHeaderGlobal  *ahoy.CHeaderInfo             // Global C header imports
+	ProgramName    string                        // Program name from declaration (empty if script)
+	PackageFiles   map[uri.URI]*PackageFile      // Other files in the same package
+	PackageSymbols *SymbolTable                  // Merged symbol table from all package files
+}
+
+type PackageFile struct {
+	URI     uri.URI
+	Content string
+	AST     *ahoy.ASTNode
+	Symbols *SymbolTable
 }
 
 type Server struct {
@@ -210,6 +221,15 @@ func (s *Server) handleDidOpen(ctx context.Context, reply jsonrpc2.Replier, req 
 			Functions: make(map[string]*ahoy.CFunction),
 			Enums:     make(map[string]*ahoy.CEnum),
 			Defines:   make(map[string]*ahoy.CDefine),
+		}
+	}
+
+	// Extract program name and load package files
+	if doc.AST != nil {
+		doc.ProgramName = extractProgramName(doc.AST)
+		if doc.ProgramName != "" {
+			debugLog.Printf("Program name: %s, loading package files...", doc.ProgramName)
+			s.loadPackageFiles(doc)
 		}
 	}
 
@@ -445,4 +465,116 @@ func extractCHeaderInfo(ast *ahoy.ASTNode) (map[string]*ahoy.CHeaderInfo, *ahoy.
 	}
 	
 	return cHeaders, cHeaderGlobal
+}
+
+// extractProgramName gets the program name from a program declaration
+func extractProgramName(ast *ahoy.ASTNode) string {
+	if ast == nil {
+		return ""
+	}
+	
+	for _, child := range ast.Children {
+		if child.Type == ahoy.NODE_PROGRAM_DECLARATION {
+			return child.Value
+		}
+	}
+	
+	return ""
+}
+
+// loadPackageFiles loads other .ahoy files in the same directory with the same program name
+func (s *Server) loadPackageFiles(doc *Document) {
+	// Get directory from URI
+	filePath := string(doc.URI)[7:] // Remove "file://" prefix
+	dir := filePath[:strings.LastIndex(filePath, "/")]
+	
+	// Read directory
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		debugLog.Printf("Error reading directory %s: %v", dir, err)
+		return
+	}
+	
+	doc.PackageFiles = make(map[uri.URI]*PackageFile)
+	
+	// Load all .ahoy files with matching program name
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".ahoy") {
+			continue
+		}
+		
+		fileURI := uri.URI("file://" + dir + "/" + entry.Name())
+		
+		// Skip the current document
+		if fileURI == doc.URI {
+			continue
+		}
+		
+		// Read file content
+		content, err := os.ReadFile(dir + "/" + entry.Name())
+		if err != nil {
+			debugLog.Printf("Error reading file %s: %v", entry.Name(), err)
+			continue
+		}
+		
+		// Parse file
+		tokens := ahoy.Tokenize(string(content))
+		ast, _ := ahoy.ParseLint(tokens)
+		
+		// Check if it has the same program name
+		progName := extractProgramName(ast)
+		if progName != doc.ProgramName {
+			continue
+		}
+		
+		// Build symbol table for this file
+		symbols := BuildSymbolTable(ast)
+		
+		// Add to package files
+		doc.PackageFiles[fileURI] = &PackageFile{
+			URI:     fileURI,
+			Content: string(content),
+			AST:     ast,
+			Symbols: symbols,
+		}
+		
+		debugLog.Printf("Loaded package file: %s", entry.Name())
+	}
+	
+	// Merge symbol tables from all package files
+	doc.PackageSymbols = NewSymbolTable()
+	
+	// Add symbols from current file
+	if doc.SymbolTable != nil {
+		mergeSymbolTable(doc.PackageSymbols.GlobalScope, doc.SymbolTable.GlobalScope)
+	}
+	
+	// Add symbols from other package files
+	for _, pkgFile := range doc.PackageFiles {
+		if pkgFile.Symbols != nil {
+			mergeSymbolTable(doc.PackageSymbols.GlobalScope, pkgFile.Symbols.GlobalScope)
+		}
+	}
+	
+	debugLog.Printf("Merged package symbols from %d files", len(doc.PackageFiles)+1)
+}
+
+// mergeSymbolTable merges symbols from src into dst
+func mergeSymbolTable(dst *Scope, src *Scope) {
+	if src == nil || dst == nil {
+		return
+	}
+	
+	// Copy all symbols from src to dst
+	for name, symbol := range src.Symbols {
+		// Only add if not already present (current file takes precedence)
+		if _, exists := dst.Symbols[name]; !exists {
+			dst.Symbols[name] = symbol
+		}
+	}
+	
+	// Recursively merge child scopes
+	for _, srcChild := range src.Children {
+		mergeSymbolTable(dst, srcChild)
+	}
 }

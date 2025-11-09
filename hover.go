@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"ahoy"
 
@@ -229,8 +230,16 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 	}
 
 	// Look up Ahoy symbol in the symbol table
-	if doc.SymbolTable != nil {
-		symbol := doc.SymbolTable.Lookup(word)
+	// Use PackageSymbols if available (for multi-file packages), otherwise use regular SymbolTable
+	var symbolTable *SymbolTable
+	if doc.PackageSymbols != nil {
+		symbolTable = doc.PackageSymbols
+	} else {
+		symbolTable = doc.SymbolTable
+	}
+	
+	if symbolTable != nil {
+		symbol := symbolTable.Lookup(word)
 		if symbol == nil {
 			// Check if it's a keyword
 			if hoverText := getKeywordHover(word); hoverText != "" {
@@ -284,14 +293,36 @@ func buildHoverText(symbol *Symbol) string {
 		text += fmt.Sprintf("Defined at line %d", symbol.Line)
 
 	case SymbolKindFunction:
-		text = fmt.Sprintf("```ahoy\nfunc %s", symbol.Name)
-		if symbol.Type != "" {
-			text += fmt.Sprintf(" -> %s", symbol.Type)
+		// Build parameter list
+		params := []string{}
+		for _, param := range symbol.Parameters {
+			paramStr := param.Name
+			if param.Type != "" && param.Type != "generic" {
+				paramStr += ":" + param.Type
+			}
+			params = append(params, paramStr)
 		}
-		text += "\n```\n\n"
+		
+		// Build signature: @ name :: |params| returnType:
+		returnType := symbol.Type
+		if returnType == "" {
+			returnType = "void"
+		}
+		
+		text = fmt.Sprintf("```ahoy\n@ %s :: |%s| %s:\n```\n\n",
+			symbol.Name,
+			strings.Join(params, ", "),
+			returnType)
 		text += fmt.Sprintf("**Function** `%s`\n\n", symbol.Name)
-		if symbol.Type != "" {
-			text += fmt.Sprintf("Returns: `%s`\n\n", symbol.Type)
+		if len(symbol.Parameters) > 0 {
+			text += "**Parameters:**\n"
+			for _, param := range symbol.Parameters {
+				text += fmt.Sprintf("- `%s`: %s\n", param.Name, param.Type)
+			}
+			text += "\n"
+		}
+		if returnType != "void" {
+			text += fmt.Sprintf("**Returns:** `%s`\n\n", returnType)
 		}
 		text += fmt.Sprintf("Defined at line %d", symbol.Line)
 

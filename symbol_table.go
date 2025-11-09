@@ -10,14 +10,15 @@ import (
 
 // Symbol represents a symbol in the code (variable, function, type, etc.)
 type Symbol struct {
-	Name      string
-	Kind      SymbolKind
-	Type      string
-	Line      int
-	Column    int
-	EndLine   int
-	EndColumn int
-	Fields    map[string]*StructField // For struct types, stores fields and nested types
+	Name       string
+	Kind       SymbolKind
+	Type       string
+	Line       int
+	Column     int
+	EndLine    int
+	EndColumn  int
+	Fields     map[string]*StructField // For struct types, stores fields and nested types
+	Parameters []ParameterInfo         // For functions, stores parameter information
 	// Don't store Definition node or Scope to prevent memory leaks - AST can't be GC'd
 }
 
@@ -213,19 +214,37 @@ func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
 		// Add function to symbol table
 		funcName := node.Value
 		symbol := &Symbol{
-			Name:   funcName,
-			Kind:   SymbolKindFunction,
-			Type:   node.DataType,
-			Line:   node.Line,
-			Column: 0,
+			Name:       funcName,
+			Kind:       SymbolKindFunction,
+			Type:       node.DataType,
+			Line:       node.Line,
+			Column:     0,
+			Parameters: []ParameterInfo{},
 		}
+		
+		// Collect parameters
+		if len(node.Children) > 0 {
+			params := node.Children[0]
+			if params != nil && params.Type == ahoy.NODE_BLOCK {
+				for _, paramNode := range params.Children {
+					if paramNode.Type == ahoy.NODE_IDENTIFIER {
+						symbol.Parameters = append(symbol.Parameters, ParameterInfo{
+							Name:       paramNode.Value,
+							Type:       paramNode.DataType,
+							HasDefault: paramNode.DefaultValue != nil,
+						})
+					}
+				}
+			}
+		}
+		
 		st.AddSymbol(symbol)
 
 		// Enter function scope
 		st.EnterScope()
 		st.CurrentScope.StartLine = node.Line
 
-		// Add parameters
+		// Add parameters as symbols in function scope
 		if len(node.Children) > 0 {
 			params := node.Children[0]
 			if params != nil && params.Type == ahoy.NODE_BLOCK {

@@ -9,6 +9,15 @@ import (
 	"go.lsp.dev/protocol"
 )
 
+// getSymbolTable returns the appropriate symbol table for the document
+// Uses PackageSymbols if available (for multi-file packages), otherwise SymbolTable
+func getSymbolTable(doc *Document) *SymbolTable {
+	if doc.PackageSymbols != nil {
+		return doc.PackageSymbols
+	}
+	return doc.SymbolTable
+}
+
 func (s *Server) publishDiagnostics(ctx context.Context, doc *Document) {
 	diagnostics := []protocol.Diagnostic{}
 
@@ -194,7 +203,8 @@ func checkProgramDeclarationPosition(doc *Document) *protocol.Diagnostic {
 func checkConstReassignment(doc *Document) []protocol.Diagnostic {
 	diagnostics := []protocol.Diagnostic{}
 
-	if doc.AST == nil || doc.SymbolTable == nil {
+	symbolTable := getSymbolTable(doc)
+	if doc.AST == nil || symbolTable == nil {
 		return diagnostics
 	}
 
@@ -246,7 +256,7 @@ func checkConstReassignment(doc *Document) []protocol.Diagnostic {
 			varName := node.Value
 			if varName != "" {
 				// Look up the symbol
-				sym := doc.SymbolTable.GlobalScope.Lookup(varName)
+				sym := symbolTable.GlobalScope.Lookup(varName)
 				if sym != nil && sym.Kind == SymbolKindConstant {
 					// Error: trying to reassign a constant
 					lineText := ""
@@ -1185,7 +1195,13 @@ func findSimilarFunction(name string, availableFuncs []string) (string, int) {
 func checkUndefinedFunctions(doc *Document) []protocol.Diagnostic {
 	diagnostics := []protocol.Diagnostic{}
 
-	if doc.AST == nil || doc.SymbolTable == nil {
+	// Use PackageSymbols if available, otherwise use SymbolTable
+	symbolTable := doc.SymbolTable
+	if doc.PackageSymbols != nil {
+		symbolTable = doc.PackageSymbols
+	}
+
+	if doc.AST == nil || symbolTable == nil {
 		return diagnostics
 	}
 
@@ -1193,8 +1209,8 @@ func checkUndefinedFunctions(doc *Document) []protocol.Diagnostic {
 	availableFuncs := make([]string, 0)
 	availableFuncs = append(availableFuncs, builtinFunctions...)
 
-	// Add user-defined functions from symbol table
-	for _, sym := range doc.SymbolTable.GlobalScope.Symbols {
+	// Add user-defined functions from symbol table (includes package symbols)
+	for _, sym := range symbolTable.GlobalScope.Symbols {
 		if sym.Kind == SymbolKindFunction {
 			availableFuncs = append(availableFuncs, sym.Name)
 		}
@@ -1255,7 +1271,7 @@ func checkUndefinedFunctions(doc *Document) []protocol.Diagnostic {
 
 			// Check if function exists (built-in or user-defined or C import)
 			if !isBuiltinFunction(funcName) {
-				sym := doc.SymbolTable.GlobalScope.Lookup(funcName)
+				sym := symbolTable.GlobalScope.Lookup(funcName)
 				isUserDefined := sym != nil && sym.Kind == SymbolKindFunction
 				
 				// Check if it's a C function (global import)
@@ -1333,7 +1349,8 @@ func checkUndefinedFunctions(doc *Document) []protocol.Diagnostic {
 func checkUndeclaredIdentifiers(doc *Document) []protocol.Diagnostic {
 	diagnostics := []protocol.Diagnostic{}
 
-	if doc.AST == nil || doc.SymbolTable == nil {
+	symbolTable := getSymbolTable(doc)
+	if doc.AST == nil || symbolTable == nil {
 		return diagnostics
 	}
 
@@ -1343,7 +1360,7 @@ func checkUndeclaredIdentifiers(doc *Document) []protocol.Diagnostic {
 		childIndex int // Which child scope we're currently using
 	}
 	
-	scopeStack := []scopeInfo{{scope: doc.SymbolTable.GlobalScope, childIndex: 0}}
+	scopeStack := []scopeInfo{{scope: symbolTable.GlobalScope, childIndex: 0}}
 
 	// Walk the AST looking for identifier usage
 	var checkNode func(*ahoy.ASTNode, int)
@@ -1672,7 +1689,8 @@ func inferArgType(node *ahoy.ASTNode) string {
 func checkFunctionCallArgumentCounts(doc *Document) []protocol.Diagnostic {
 	diagnostics := []protocol.Diagnostic{}
 
-	if doc.AST == nil || doc.SymbolTable == nil {
+	symbolTable := getSymbolTable(doc)
+	if doc.AST == nil || symbolTable == nil {
 		return diagnostics
 	}
 
@@ -1718,6 +1736,15 @@ func checkFunctionCallArgumentCounts(doc *Document) []protocol.Diagnostic {
 	}
 
 	collectFunctions(doc.AST)
+	
+	// Also collect functions from package files
+	if doc.PackageFiles != nil {
+		for _, pkgFile := range doc.PackageFiles {
+			if pkgFile.AST != nil {
+				collectFunctions(pkgFile.AST)
+			}
+		}
+	}
 	
 	// Add C function signatures from imported headers
 	if doc.CHeaderGlobal != nil {
@@ -1868,7 +1895,8 @@ func checkFunctionCallArgumentCounts(doc *Document) []protocol.Diagnostic {
 func checkFunctionCallArgumentTypes(doc *Document) []protocol.Diagnostic {
 	diagnostics := []protocol.Diagnostic{}
 
-	if doc.AST == nil || doc.SymbolTable == nil {
+	symbolTable := getSymbolTable(doc)
+	if doc.AST == nil || symbolTable == nil {
 		return diagnostics
 	}
 
@@ -1914,6 +1942,15 @@ func checkFunctionCallArgumentTypes(doc *Document) []protocol.Diagnostic {
 	}
 
 	collectFunctions(doc.AST)
+	
+	// Also collect functions from package files
+	if doc.PackageFiles != nil {
+		for _, pkgFile := range doc.PackageFiles {
+			if pkgFile.AST != nil {
+				collectFunctions(pkgFile.AST)
+			}
+		}
+	}
 
 	// Add C imported functions (global)
 	if doc.CHeaderGlobal != nil {

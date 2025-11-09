@@ -8,34 +8,33 @@ TEST::"kjklkjlk"
 tkest::"kjklkjlk"
 bob::"kjklkjlk"
 BOB::"kjl"
-tekk::[32]
+tekk::{}
+tekkk::[]
 tekkst::9
 test:"kjklkjlk"
 
 ? Valid function
-greet :: | name:string |:
+@ greet :: | name:string |:
 	ahoy|f"Hello, {}"|
 	ahoy|f"Hello, {}"|
 	ahoy|f"Hello, {}"|
 	ahoy|f"Hello, {}"|
 $
 
-greet2 :: | name:int | void:
-	ahoy|"Hello,"|
-$
+
+
+? greet2|"mike"|
+
 
 ? if greet3.length|| > 10 then print |"hello"|
 
 ? Valid loop
-loop i: 0 to 10 do
-	print|"Hello"|
-$
 ? |i| loop from 1 to 10:
 ? 	ahoy|j|
 
 ? Valid if statement
 x: 42
-if x is 42 do ahoy |"The answer!"|
+if x is 42 then ahoy |"The answer!"|
 
 ? Variables for autocomplete testing
 my_variable: 100
@@ -56,19 +55,25 @@ switch possible_color on
   _: ahoy |"Unknown color"|
 $
 
+@ greet2 :: | name:string | void:
+	ahoy|"Hello,"|
+$
 
-struct point: x:float time:int type smoke_particle: y: int
-? Enum declaration
+struct possible_color:
+	x:float time:int type smoke_particle: y: int
+$
 
-enum examp:
+
+enum burger:
 	ONE
 	TWO THREE
 $
 
-bobkkk :: |test:string|: print|"This is a test"|
+@ bobkkk :: |test:string|: print|"This is a test"| $
 
-? Test operators
+? Test operators till
 result: 5 plus 3
+result2: 10 minus 2
 result2: 10 minus 2
 result3: 4 times 5
 result4: 20 div 4
@@ -98,18 +103,18 @@ first: object_numbers<"one"> ? valid syntax no compiler error
 
 object_numbers : <one:"one", two:"two", three:"three", four:"four", five:"five"> ? fyi this is an object literal not an array literal
 
-object_numbers: <1:"one", 2:"two", 3:"three", 4:"four", 5:"five"> ? should give linter error	 "object keys must be strings"
+object_numbers2: {1:"one", 2:"two", 3:"three", 4:"four", 5:"five"} ? should give linter error	 "object keys must be strings"
 first: object_numbers.one ? valid syntax should not give compiler error fives use of undecalered variable
 
-numbersk: {1:9, 2, 3, 4, 5}
+numbersk: [1, 2, 3, 4, 5]
 
 first: numbers[0] ? linter error "invalid dict access syntax, use dict{} instead of array[]"
 first2: numbers{0} ? valid syntax no compiler error
 first3: numbers<0> ? linter error "invalid dict access syntax, use dict{} instead of object<>"
 
 ? Dictionary
-? person: {"name": "Alice", "age": 30}
-name_val: person["name"]
+person: <name: "Alice", age: 30>
+name_val: person<"name">
 
 ? This should trigger autocomplete when you type 'fu' or 'lo' or 'if'
 
@@ -126,23 +131,25 @@ struct person:
 $
 
 
-person: <name: "Alice", age: 30, height: 12> ? would be inferred as person.dwarf type
+person2: dwarf<name: "Alice", age: 30, height: 12> ? would be inferred as person.dwarf type
+print|person2|
 print|f"{person.name}"|
 
 
 
 
 print|f"{person.type}"|
-test_di:dict= {"name": "Alice", "age": 30}
+test_d: {323: "Alice",90: 30}
+print|test_d|
 
 test_arraay : [299,90]
 test_arraay[0]
 person<'name'> : "bob"
-dict_example:dict= {"name": "Alice", "age": 30}? if we have struct with these explicit properties we infer the type to be person
+dict_example :dict= {"name": "Alice", "age": 30}? if we have struct with these explicit properties we infer the type to be person
 person<'name'> : "bob"
 dict_example{"name"} : "charlene"
 
-numbers:array=  [1, 2, 3, 4, 5]
+numbers :array =  [1, 2, 3, 4, 5]
 
 
 
