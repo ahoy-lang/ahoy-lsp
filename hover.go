@@ -239,7 +239,8 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 	}
 	
 	if symbolTable != nil {
-		symbol := symbolTable.Lookup(word)
+		// Use LookupAtPosition to find symbols in the correct scope (including function-local variables)
+		symbol := symbolTable.LookupAtPosition(word, int(params.Position.Line)+1, int(params.Position.Character))
 		if symbol == nil {
 			// Check if it's a keyword
 			if hoverText := getKeywordHover(word); hoverText != "" {

@@ -197,10 +197,10 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 	
 	if doc.PackageSymbols != nil {
 		symbolTable = doc.PackageSymbols
-		symbol = symbolTable.Lookup(word)
+		symbol = symbolTable.LookupAtPosition(word, int(params.Position.Line)+1, int(params.Position.Character))
 	} else if doc.SymbolTable != nil {
 		symbolTable = doc.SymbolTable
-		symbol = symbolTable.Lookup(word)
+		symbol = symbolTable.LookupAtPosition(word, int(params.Position.Line)+1, int(params.Position.Character))
 	}
 	
 	if symbol != nil {

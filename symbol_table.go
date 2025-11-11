@@ -147,6 +147,39 @@ func (st *SymbolTable) Lookup(name string) *Symbol {
 	return st.CurrentScope.Lookup(name)
 }
 
+// LookupAtPosition looks up a symbol by name at a specific position, considering scope
+func (st *SymbolTable) LookupAtPosition(name string, line, column int) *Symbol {
+	scope := st.findScopeAtPosition(st.GlobalScope, line)
+	if scope != nil {
+		return scope.Lookup(name)
+	}
+	return st.GlobalScope.Lookup(name)
+}
+
+// findScopeAtPosition finds the innermost scope that contains the given position
+func (st *SymbolTable) findScopeAtPosition(scope *Scope, line int) *Scope {
+	if scope == nil {
+		return nil
+	}
+	
+	// Check child scopes first (innermost)
+	for _, child := range scope.Children {
+		if child != nil && line >= child.StartLine && line <= child.EndLine {
+			if innerScope := st.findScopeAtPosition(child, line); innerScope != nil {
+				return innerScope
+			}
+			return child
+		}
+	}
+	
+	// Return current scope if position is within it
+	if line >= scope.StartLine && (scope.EndLine == 0 || line <= scope.EndLine) {
+		return scope
+	}
+	
+	return nil
+}
+
 func (st *SymbolTable) FindSymbolAtPosition(line, column int) *Symbol {
 	return st.findSymbolInScope(st.GlobalScope, line, column)
 }
