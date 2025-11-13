@@ -2312,7 +2312,27 @@ func checkTypeMismatches(doc *Document) []protocol.Diagnostic {
 			if len(node.Children) > 0 {
 				actualType := inferExpressionType(node.Children[0], doc)
 
+				// Check type compatibility - handle explicitly typed collections
+				typeMismatch := false
 				if actualType != "unknown" && actualType != expectedType && expectedType != "generic" {
+					// For explicitly typed collections (array[type], dict[key,val]),
+					// the inferred type will be just "array" or "dict"
+					// This is valid - the explicit type provides the full information
+					if strings.HasPrefix(expectedType, "array[") {
+						if actualType != "array" && actualType != "unknown" {
+							typeMismatch = true
+						}
+					} else if strings.HasPrefix(expectedType, "dict[") {
+						if actualType != "dict" && actualType != "unknown" {
+							typeMismatch = true
+						}
+					} else {
+						// Non-collection types must match exactly
+						typeMismatch = true
+					}
+				}
+				
+				if typeMismatch {
 					lineText := ""
 					if node.Line > 0 && node.Line <= len(doc.Lines) {
 						lineText = doc.Lines[node.Line-1]
@@ -2351,7 +2371,27 @@ func checkTypeMismatches(doc *Document) []protocol.Diagnostic {
 			if len(node.Children) > 0 {
 				actualType := inferExpressionType(node.Children[0], doc)
 
+				// Check type compatibility - handle explicitly typed collections
+				typeMismatch := false
 				if actualType != "unknown" && actualType != expectedType && expectedType != "generic" {
+					// For explicitly typed collections (array[type], dict[key,val]),
+					// the inferred type will be just "array" or "dict"
+					// This is valid - the explicit type provides the full information
+					if strings.HasPrefix(expectedType, "array[") {
+						if actualType != "array" && actualType != "unknown" {
+							typeMismatch = true
+						}
+					} else if strings.HasPrefix(expectedType, "dict[") {
+						if actualType != "dict" && actualType != "unknown" {
+							typeMismatch = true
+						}
+					} else {
+						// Non-collection types must match exactly
+						typeMismatch = true
+					}
+				}
+				
+				if typeMismatch {
 					lineText := ""
 					if node.Line > 0 && node.Line <= len(doc.Lines) {
 						lineText = doc.Lines[node.Line-1]

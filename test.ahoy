@@ -13,7 +13,6 @@ tekkk::[]
 tekkst::9
 test:"kjklkjlk"
 
-? Valid function
 @ greet :: | name:string |:
 	ahoy|f"Hello, {}"|
 	ahoy|f"Hello, {}"|
@@ -48,10 +47,10 @@ bad_variable: "this is wrong"
 
 
 possible_color: "red"
-switch possible_color on
-  "red" : ahoy|"Red color"|
-  "blue" : ahoy|"Blue color"|
-  "green" :ahoy|"jkljlk"|
+switch possible_color:
+  on "red" : ahoy|"Red color"|
+  on "blue" : ahoy|"Blue color"|
+  on "green" :ahoy|"jkljlk"|
   _: ahoy |"Unknown color"|
 $
 
@@ -60,13 +59,14 @@ $
 $
 
 struct possible_color:
-	x:float time:int type smoke_particle: y: int
+	x:float time:int
+	type smoke_particle:
+	 y: int
 $
 
 
 enum burger:
-	ONE
-	TWO THREE
+	ONE TWO THREE
 $
 
 @ bobkkk :: |test:string|: print|"This is a test"| $
@@ -124,10 +124,11 @@ person.test : "hello"
 
 
 struct person:
-	name: string
-	age: int
+	name: string age: int
 	type dwarf:
-		height:int
+		10 height:int
+	type giant:
+		50 height:int
 $
 
 
@@ -144,9 +145,9 @@ print|test_d|
 
 test_arraay : [299,90]
 test_arraay[0]
-person<'name'> : "bob"
+person<"name"> : "bob"
 dict_example :dict= {"name": "Alice", "age": 30}? if we have struct with these explicit properties we infer the type to be person
-person<'name'> : "bob"
+person<"name"> : "bob"
 dict_example{"name"} : "charlene"
 
 numbers :array =  [1, 2, 3, 4, 5]
