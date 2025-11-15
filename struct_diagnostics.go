@@ -85,11 +85,11 @@ func checkStructMemberAccess(doc *Document) []protocol.Diagnostic {
 		if node.Type == ahoy.NODE_ASSIGNMENT && len(node.Children) > 0 {
 			// Check if the variable being assigned is a member access
 			if node.Value != "" && strings.Contains(node.Value, ".") {
-				// This is a property assignment like: obj.property: value
+				// This is a property assignment like: obj.property: value or obj.nested.property: value
 				parts := strings.SplitN(node.Value, ".", 2)
 				if len(parts) == 2 {
 					objName := parts[0]
-					propName := parts[1]
+					propPath := parts[1] // Could be "property" or "nested.property"
 
 					sym := doc.SymbolTable.GlobalScope.Lookup(objName)
 					if sym != nil {
@@ -101,8 +101,35 @@ func checkStructMemberAccess(doc *Document) []protocol.Diagnostic {
 							structSym := doc.SymbolTable.GlobalScope.Lookup(structTypeName)
 
 							if structSym != nil && structSym.Kind == SymbolKindStruct {
-								// Check if property exists
-								field, exists := structSym.Fields[propName]
+								// Walk the property path to find the final field
+								propParts := strings.Split(propPath, ".")
+								currentFields := structSym.Fields
+								var field *StructField
+								exists := true
+								
+								for i, propName := range propParts {
+									field, exists = currentFields[propName]
+									if !exists {
+										break
+									}
+									// If not the last part, get the nested struct's fields
+									if i < len(propParts)-1 {
+										// Look up the type of this field to get its struct definition
+										fieldType := field.Type
+										if strings.HasPrefix(fieldType, "struct:") {
+											fieldType = strings.TrimPrefix(fieldType, "struct:")
+										}
+										fieldStructSym := doc.SymbolTable.GlobalScope.Lookup(fieldType)
+										if fieldStructSym != nil && fieldStructSym.Kind == SymbolKindStruct {
+											currentFields = fieldStructSym.Fields
+										} else {
+											// Field type is not a struct, can't continue
+											exists = false
+											break
+										}
+									}
+								}
+								
 								if !exists {
 									lineText := ""
 									if node.Line > 0 && node.Line <= len(doc.Lines) {
@@ -126,7 +153,7 @@ func checkStructMemberAccess(doc *Document) []protocol.Diagnostic {
 										},
 										Severity: protocol.DiagnosticSeverityError,
 										Source:   "ahoy",
-										Message:  "type '" + structTypeName + "' does not have property '" + propName + "'",
+										Message:  "type '" + structTypeName + "' does not have property '" + propPath + "'",
 										Code:     "undefined-property",
 									}
 									diagnostics = append(diagnostics, diagnostic)
@@ -161,7 +188,7 @@ func checkStructMemberAccess(doc *Document) []protocol.Diagnostic {
 													},
 													Severity: protocol.DiagnosticSeverityError,
 													Source:   "ahoy",
-													Message:  propName + " is of type " + expectedType + " and cannot be assigned a " + actualType + " value",
+													Message:  propPath + " is of type " + expectedType + " and cannot be assigned a " + actualType + " value",
 													Code:     "type-mismatch",
 												}
 												diagnostics = append(diagnostics, diagnostic)

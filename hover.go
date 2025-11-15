@@ -348,7 +348,30 @@ func buildHoverText(symbol *Symbol) string {
 		text += fmt.Sprintf("Defined at line %d", symbol.Line)
 
 	case SymbolKindStruct:
-		text = fmt.Sprintf("```ahoy\n%s struct\n```\n\n", symbol.Name)
+		text = fmt.Sprintf("```ahoy\nstruct %s:\n", symbol.Name)
+		if len(symbol.Fields) > 0 {
+			for fieldName, field := range symbol.Fields {
+				if len(field.Fields) > 0 {
+					// Nested type
+					text += fmt.Sprintf("  type %s:\n", fieldName)
+					for nestedFieldName, nestedField := range field.Fields {
+						text += fmt.Sprintf("    %s: %s", nestedFieldName, nestedField.Type)
+						if nestedField.DefaultValue != "" {
+							text += fmt.Sprintf(" = %s", nestedField.DefaultValue)
+						}
+						text += "\n"
+					}
+				} else {
+					// Regular field
+					text += fmt.Sprintf("  %s: %s", fieldName, field.Type)
+					if field.DefaultValue != "" {
+						text += fmt.Sprintf(" = %s", field.DefaultValue)
+					}
+					text += "\n"
+				}
+			}
+		}
+		text += "```\n\n"
 		text += fmt.Sprintf("**Struct** `%s`\n\n", symbol.Name)
 		text += fmt.Sprintf("Defined at line %d", symbol.Line)
 
