@@ -48,9 +48,9 @@ bad_variable: "this is wrong"
 
 possible_color: "red"
 switch possible_color:
-  on "red" : ahoy|"Red color"|
-  on "blue" : ahoy|"Blue color"|
-  on "green" :ahoy|"jkljlk"|
+  on "red": ahoy|"Red color"|
+  on "blue": ahoy|"Blue color"|
+  on "green": ahoy|"jkljlk"|
   _: ahoy |"Unknown color"|
 $
 

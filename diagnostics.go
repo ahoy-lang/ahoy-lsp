@@ -1544,6 +1544,27 @@ func checkUndeclaredIdentifiers(doc *Document) []protocol.Diagnostic {
 			}
 			return
 
+		case ahoy.NODE_IF_STATEMENT:
+			// IF statements also create a scope, so we need to push it
+			if currentInfo.childIndex < len(scope.Children) {
+				ifScope := scope.Children[currentInfo.childIndex]
+				currentInfo.childIndex++
+				scopeStack = append(scopeStack, scopeInfo{scope: ifScope, childIndex: 0})
+				
+				// Check all children in the if scope
+				for _, child := range node.Children {
+					checkNode(child, depth+1)
+				}
+				
+				scopeStack = scopeStack[:len(scopeStack)-1]
+			} else {
+				// No more child scopes, check with current scope
+				for _, child := range node.Children {
+					checkNode(child, depth+1)
+				}
+			}
+			return
+
 		case ahoy.NODE_WHILE_LOOP, ahoy.NODE_FOR_RANGE_LOOP, ahoy.NODE_FOR_COUNT_LOOP,
 			ahoy.NODE_FOR_IN_ARRAY_LOOP, ahoy.NODE_FOR_IN_DICT_LOOP:
 			// Push loop scope (take next child scope from current scope)
