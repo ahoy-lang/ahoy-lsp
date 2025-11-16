@@ -41,6 +41,8 @@ const (
 	SymbolKindStruct
 	SymbolKindStructField
 	SymbolKindConstant
+	SymbolKindAlias      // Type alias
+	SymbolKindUnion      // Union type
 	SymbolKindCFunction  // C function from imported header
 	SymbolKindCEnum      // C enum from imported header
 	SymbolKindCDefine    // C #define from imported header
@@ -81,6 +83,65 @@ func (s *Scope) Lookup(name string) *Symbol {
 
 func (s *Scope) LookupLocal(name string) *Symbol {
 	return s.Symbols[name]
+}
+
+// ResolveType resolves type aliases and unions to their underlying types
+// Returns the resolved type and whether it's a union type
+func (s *Scope) ResolveType(typeName string) (string, bool) {
+	sym := s.Lookup(typeName)
+	if sym == nil {
+		return typeName, false
+	}
+	
+	if sym.Kind == SymbolKindAlias {
+		// Recursively resolve in case of nested aliases
+		return s.ResolveType(sym.Type)
+	}
+	
+	if sym.Kind == SymbolKindUnion {
+		// For unions, return the type as-is but mark it as a union
+		return sym.Type, true
+	}
+	
+	return typeName, false
+}
+
+// TypesCompatible checks if two types are compatible, resolving aliases
+func (s *Scope) TypesCompatible(expected, actual string) bool {
+	// Resolve both types
+	expectedResolved, expectedIsUnion := s.ResolveType(expected)
+	actualResolved, actualIsUnion := s.ResolveType(actual)
+	
+	// If expected is a union, check if actual matches any of the union types
+	if expectedIsUnion {
+		// Union types are stored with | separator (e.g., "int|float")
+		unionTypes := strings.Split(expectedResolved, "|")
+		for _, ut := range unionTypes {
+			ut = strings.TrimSpace(ut)
+			resolvedUT, _ := s.ResolveType(ut)
+			if resolvedUT == actualResolved || resolvedUT == actual {
+				return true
+			}
+		}
+		return false
+	}
+	
+	// If actual is a union, check if expected matches any of the union types
+	if actualIsUnion {
+		// Union types are stored with | separator (e.g., "int|float")
+		unionTypes := strings.Split(actualResolved, "|")
+		for _, ut := range unionTypes {
+			ut = strings.TrimSpace(ut)
+			resolvedUT, _ := s.ResolveType(ut)
+			if resolvedUT == expectedResolved || resolvedUT == expected {
+				return true
+			}
+		}
+		return false
+	}
+	
+	// Direct comparison of resolved types
+	return expectedResolved == actualResolved || expected == actual || expectedResolved == actual
 }
 
 // SymbolTable manages all symbols in a document
@@ -436,6 +497,35 @@ func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
 			// Walk right side to process the function call
 			st.walkNode(rightSide, depth+1)
 		}
+
+	case ahoy.NODE_ALIAS_DECLARATION:
+		aliasName := node.Value
+		symbol := &Symbol{
+			Name:   aliasName,
+			Kind:   SymbolKindAlias,
+			Type:   node.DataType, // The aliased type
+			Line:   node.Line,
+			Column: 0,
+		}
+		st.AddSymbol(symbol)
+
+	case ahoy.NODE_UNION_DECLARATION:
+		unionName := node.Value
+		// Collect all types in the union
+		var unionTypes []string
+		for _, child := range node.Children {
+			if child.Type == ahoy.NODE_TYPE {
+				unionTypes = append(unionTypes, child.Value)
+			}
+		}
+		symbol := &Symbol{
+			Name:   unionName,
+			Kind:   SymbolKindUnion,
+			Type:   strings.Join(unionTypes, "|"), // Store as "int|float"
+			Line:   node.Line,
+			Column: 0,
+		}
+		st.AddSymbol(symbol)
 
 	case ahoy.NODE_ENUM_DECLARATION:
 		enumName := node.Value

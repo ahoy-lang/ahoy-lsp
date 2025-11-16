@@ -33,7 +33,7 @@ $
 
 ? Valid if statement
 x: 42
-if x is 42 then ahoy |"The answer!"|
+if x is 42 then ahoy |"The answer!"|$
 
 ? Variables for autocomplete testing
 my_variable: 100
@@ -59,7 +59,8 @@ $
 $
 
 struct possible_color:
-	x:float time:int
+	x:float
+	time:int
 	type smoke_particle:
 	 y: int
 $
@@ -109,7 +110,7 @@ first: object_numbers.one ? valid syntax should not give compiler error fives us
 numbersk: [1, 2, 3, 4, 5]
 
 first: numbers[0] ? linter error "invalid dict access syntax, use dict{} instead of array[]"
-first2: numbers{0} ? valid syntax no compiler error
+first2: numbers[0] ? valid syntax no compiler error
 first3: numbers<0> ? linter error "invalid dict access syntax, use dict{} instead of object<>"
 
 ? Dictionary
@@ -132,7 +133,7 @@ struct person:
 $
 
 
-person2: dwarf<name: "Alice", age: 30, height: 12> ? would be inferred as person.dwarf type
+person2: dwarf{name: "Alice", age: 30, height: 12} ? would be inferred as person.dwarf type
 print|person2|
 print|f"{person.name}"|
 
@@ -146,9 +147,9 @@ print|test_d|
 test_arraay : [299,90]
 test_arraay[0]
 person<"name"> : "bob"
-dict_example :dict= {"name": "Alice", "age": 30}? if we have struct with these explicit properties we infer the type to be person
+dict_example :dict= <"name": "Alice", "age": 30>? if we have struct with these explicit properties we infer the type to be person
 person<"name"> : "bob"
-dict_example{"name"} : "charlene"
+dict_example<"name"> : "charlene"
 
 numbers :array =  [1, 2, 3, 4, 5]
 

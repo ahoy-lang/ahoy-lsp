@@ -489,7 +489,7 @@ func getValidStringMethods() []string {
 func getValidArrayMethods() []string {
 	return []string{
 		"length", "push", "pop", "sort", "reverse", "contains",
-		"find", "filter", "map", "join", "slice",
+		"find", "filter", "map", "join", "slice", "sum", "has",
 	}
 }
 
@@ -1412,6 +1412,11 @@ func checkUndeclaredIdentifiers(doc *Document) []protocol.Diagnostic {
 		case ahoy.NODE_IDENTIFIER:
 			identifierName := node.Value
 			
+			// Skip underscore - it's used as a wildcard/default case
+			if identifierName == "_" {
+				return
+			}
+			
 			// Look up the identifier in the current scope (searches parent scopes too)
 			sym := scope.Lookup(identifierName)
 			
@@ -1584,6 +1589,30 @@ func checkUndeclaredIdentifiers(doc *Document) []protocol.Diagnostic {
 			return
 
 		case ahoy.NODE_CALL:
+			// For function calls, check arguments but handle named arguments specially
+			for _, child := range node.Children {
+				// If this is a named argument (binary_op with "named_arg"), only check the value (right side)
+				if child.Type == ahoy.NODE_BINARY_OP && child.Value == "named_arg" {
+					// Only check the right side (the value), skip the left side (the parameter name)
+					if len(child.Children) > 1 {
+						checkNode(child.Children[1], depth+1)
+					}
+				} else {
+					checkNode(child, depth+1)
+				}
+			}
+			return
+		
+		case ahoy.NODE_BINARY_OP:
+			// Handle named arguments: skip checking the left side (parameter name)
+			if node.Value == "named_arg" {
+				// Only check the right side (the value)
+				if len(node.Children) > 1 {
+					checkNode(node.Children[1], depth+1)
+				}
+				return
+			}
+			// For other binary operations, check both sides normally
 			for _, child := range node.Children {
 				checkNode(child, depth+1)
 			}
@@ -2145,8 +2174,15 @@ func checkFunctionCallArgumentTypes(doc *Document) []protocol.Diagnostic {
 							continue
 						}
 
-						// Check for mismatch
-						if expected != actual {
+						// Check for mismatch using type compatibility (handles aliases and unions)
+						compatible := false
+						if symbolTable != nil && symbolTable.GlobalScope != nil {
+							compatible = symbolTable.GlobalScope.TypesCompatible(expected, actual)
+						} else {
+							compatible = (expected == actual)
+						}
+						
+						if !compatible {
 							mismatch = true
 							break
 						}
@@ -2312,23 +2348,31 @@ func checkTypeMismatches(doc *Document) []protocol.Diagnostic {
 			if len(node.Children) > 0 {
 				actualType := inferExpressionType(node.Children[0], doc)
 
-				// Check type compatibility - handle explicitly typed collections
+				// Check type compatibility - handle explicitly typed collections and type aliases
 				typeMismatch := false
-				if actualType != "unknown" && actualType != expectedType && expectedType != "generic" {
-					// For explicitly typed collections (array[type], dict[key,val]),
+				if actualType != "unknown" && expectedType != "generic" {
+					// For explicitly typed collections (array[type], dict<key,val>),
 					// the inferred type will be just "array" or "dict"
 					// This is valid - the explicit type provides the full information
-					if strings.HasPrefix(expectedType, "array[") {
+					if strings.HasPrefix(expectedType, "array[") || strings.HasPrefix(expectedType, "array<") {
 						if actualType != "array" && actualType != "unknown" {
 							typeMismatch = true
 						}
-					} else if strings.HasPrefix(expectedType, "dict[") {
+					} else if strings.HasPrefix(expectedType, "dict[") || strings.HasPrefix(expectedType, "dict<") {
 						if actualType != "dict" && actualType != "unknown" {
 							typeMismatch = true
 						}
 					} else {
-						// Non-collection types must match exactly
-						typeMismatch = true
+						// Use symbol table to check type compatibility (handles aliases and unions)
+						symbolTable := getSymbolTable(doc)
+						if symbolTable != nil && symbolTable.GlobalScope != nil {
+							if !symbolTable.GlobalScope.TypesCompatible(expectedType, actualType) {
+								typeMismatch = true
+							}
+						} else if actualType != expectedType {
+							// Fallback to direct comparison if no symbol table
+							typeMismatch = true
+						}
 					}
 				}
 				

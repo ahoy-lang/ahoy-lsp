@@ -110,20 +110,60 @@ func runValidate(filename string) {
 	}
 	doc.SymbolTable = BuildSymbolTable(ast)
 
-	// Run diagnostic checks directly
+	// Run all diagnostic checks (same as publishDiagnostics)
 	allDiagnostics := []protocol.Diagnostic{}
-	
-	// Check undeclared identifiers
-	diagnostics := checkUndeclaredIdentifiers(doc)
-	allDiagnostics = append(allDiagnostics, diagnostics...)
 	
 	// Check const reassignment
 	constDiags := checkConstReassignment(doc)
 	allDiagnostics = append(allDiagnostics, constDiags...)
 	
+	// Check const method calls
+	constMethodDiags := checkConstMethodCalls(doc)
+	allDiagnostics = append(allDiagnostics, constMethodDiags...)
+	
+	// Check invalid method calls
+	invalidMethodDiags := checkInvalidMethodCalls(doc)
+	allDiagnostics = append(allDiagnostics, invalidMethodDiags...)
+	
+	// Check return type violations
+	returnDiags := checkReturnTypeViolations(doc)
+	allDiagnostics = append(allDiagnostics, returnDiags...)
+	
+	// Check enum duplicates
+	enumDiags := checkEnumDuplicates(doc)
+	allDiagnostics = append(allDiagnostics, enumDiags...)
+	
+	// Check enum name duplicates
+	enumNameDiags := checkEnumNameDuplicates(doc)
+	allDiagnostics = append(allDiagnostics, enumNameDiags...)
+	
 	// Check undefined functions
 	undefinedFuncDiags := checkUndefinedFunctions(doc)
 	allDiagnostics = append(allDiagnostics, undefinedFuncDiags...)
+	
+	// Check undeclared identifiers
+	undeclaredDiags := checkUndeclaredIdentifiers(doc)
+	allDiagnostics = append(allDiagnostics, undeclaredDiags...)
+	
+	// Check function call argument counts
+	argCountDiags := checkFunctionCallArgumentCounts(doc)
+	allDiagnostics = append(allDiagnostics, argCountDiags...)
+	
+	// Check function call argument types
+	argTypeDiags := checkFunctionCallArgumentTypes(doc)
+	allDiagnostics = append(allDiagnostics, argTypeDiags...)
+	
+	// Check variable/constant type mismatches
+	typeMismatchDiags := checkTypeMismatches(doc)
+	allDiagnostics = append(allDiagnostics, typeMismatchDiags...)
+	
+	// Check struct member access
+	memberAccessDiags := checkStructMemberAccess(doc)
+	allDiagnostics = append(allDiagnostics, memberAccessDiags...)
+	
+	// Check object literal property assignment
+	objectPropDiags := checkObjectPropertyAssignment(doc)
+	allDiagnostics = append(allDiagnostics, objectPropDiags...)
 	
 	// Filter for errors only
 	errorCount := 0

@@ -486,6 +486,32 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 				}
 			}
 		}
+
+		// Add type aliases
+		for _, sym := range symbolTable.GlobalScope.Symbols {
+			if sym.Kind == SymbolKindAlias {
+				if prefix == "" || strings.HasPrefix(sym.Name, prefix) {
+					items = append(items, protocol.CompletionItem{
+						Label:  sym.Name,
+						Kind:   protocol.CompletionItemKindClass,
+						Detail: fmt.Sprintf("alias -> %s", sym.Type),
+					})
+				}
+			}
+		}
+
+		// Add union types
+		for _, sym := range symbolTable.GlobalScope.Symbols {
+			if sym.Kind == SymbolKindUnion {
+				if prefix == "" || strings.HasPrefix(sym.Name, prefix) {
+					items = append(items, protocol.CompletionItem{
+						Label:  sym.Name,
+						Kind:   protocol.CompletionItemKindClass,
+						Detail: fmt.Sprintf("union (%s)", strings.ReplaceAll(sym.Type, "|", ", ")),
+					})
+				}
+			}
+		}
 	}
 
 	// Add C header functions and enums

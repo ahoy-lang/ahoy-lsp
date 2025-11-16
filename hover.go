@@ -334,6 +334,18 @@ func buildHoverText(symbol *Symbol) string {
 			text += fmt.Sprintf("Type: `%s`", symbol.Type)
 		}
 
+	case SymbolKindAlias:
+		text = fmt.Sprintf("```ahoy\nalias %s: %s\n```\n\n", symbol.Name, symbol.Type)
+		text += fmt.Sprintf("**Type Alias** `%s`\n\n", symbol.Name)
+		text += fmt.Sprintf("Aliased type: `%s`\n\n", symbol.Type)
+		text += fmt.Sprintf("Defined at line %d", symbol.Line)
+
+	case SymbolKindUnion:
+		text = fmt.Sprintf("```ahoy\nunion %s: %s\n```\n\n", symbol.Name, strings.ReplaceAll(symbol.Type, "|", ", "))
+		text += fmt.Sprintf("**Union Type** `%s`\n\n", symbol.Name)
+		text += fmt.Sprintf("Accepts types: `%s`\n\n", strings.ReplaceAll(symbol.Type, "|", "`, `"))
+		text += fmt.Sprintf("Defined at line %d", symbol.Line)
+
 	case SymbolKindEnum:
 		text = fmt.Sprintf("```ahoy\n%s enum\n```\n\n", symbol.Name)
 		text += fmt.Sprintf("**Enum** `%s`\n\n", symbol.Name)
