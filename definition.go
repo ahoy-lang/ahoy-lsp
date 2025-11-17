@@ -207,9 +207,11 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 	if doc.PackageSymbols != nil {
 		symbolTable = doc.PackageSymbols
 		symbol = symbolTable.LookupAtPosition(word, int(params.Position.Line)+1, int(params.Position.Character))
+		debugLog.Printf("Go to definition: Looking for '%s' in PackageSymbols at line %d - found: %v", word, int(params.Position.Line)+1, symbol != nil)
 	} else if doc.SymbolTable != nil {
 		symbolTable = doc.SymbolTable
 		symbol = symbolTable.LookupAtPosition(word, int(params.Position.Line)+1, int(params.Position.Character))
+		debugLog.Printf("Go to definition: Looking for '%s' in SymbolTable at line %d - found: %v", word, int(params.Position.Line)+1, symbol != nil)
 	}
 	
 	if symbol != nil {

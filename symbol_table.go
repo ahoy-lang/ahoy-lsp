@@ -211,9 +211,19 @@ func (st *SymbolTable) Lookup(name string) *Symbol {
 // LookupAtPosition looks up a symbol by name at a specific position, considering scope
 func (st *SymbolTable) LookupAtPosition(name string, line, column int) *Symbol {
 	scope := st.findScopeAtPosition(st.GlobalScope, line)
+	debugLog.Printf("LookupAtPosition: Looking for '%s' at line %d, found scope: %v", name, line, scope != nil)
 	if scope != nil {
-		return scope.Lookup(name)
+		if scope != st.GlobalScope {
+			debugLog.Printf("LookupAtPosition: Using local scope (line %d-%d) with %d symbols", scope.StartLine, scope.EndLine, len(scope.Symbols))
+			for symName := range scope.Symbols {
+				debugLog.Printf("  - Symbol in scope: %s", symName)
+			}
+		}
+		result := scope.Lookup(name)
+		debugLog.Printf("LookupAtPosition: Symbol '%s' found in scope: %v", name, result != nil)
+		return result
 	}
+	debugLog.Printf("LookupAtPosition: No scope found, checking global")
 	return st.GlobalScope.Lookup(name)
 }
 
@@ -361,6 +371,7 @@ func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
 		// Enter function scope
 		st.EnterScope()
 		st.CurrentScope.StartLine = node.Line
+		debugLog.Printf("Entered function '%s' scope at line %d", funcName, node.Line)
 
 		// Add parameters as symbols in function scope
 		if len(node.Children) > 0 {
@@ -369,13 +380,19 @@ func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
 				// Each parameter is a NODE_IDENTIFIER with Value=name and DataType=type
 				for _, paramNode := range params.Children {
 					if paramNode.Type == ahoy.NODE_IDENTIFIER {
+						// Use function line for parameters since they're part of the function signature
+						paramLine := node.Line
+						if paramNode.Line > 0 {
+							paramLine = paramNode.Line
+						}
 						paramSymbol := &Symbol{
 							Name:   paramNode.Value,
 							Kind:   SymbolKindParameter,
 							Type:   paramNode.DataType,
-							Line:   paramNode.Line,
-							Column: 0,
+							Line:   paramLine,
+							Column: paramNode.Column,
 						}
+						debugLog.Printf("Adding parameter '%s' (type: %s) at line %d col %d to function scope", paramNode.Value, paramNode.DataType, paramLine, paramNode.Column)
 						st.AddSymbol(paramSymbol)
 					}
 				}
@@ -387,9 +404,16 @@ func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
 			bodyNode := node.Children[1]
 			st.walkNode(bodyNode, depth+1)
 			
-			// Try to set end line from body
-			if bodyNode != nil && bodyNode.Line > 0 {
-				st.CurrentScope.EndLine = findLastLine(bodyNode)
+			// Set end line from body - don't rely on body node's line, use children
+			if bodyNode != nil {
+				endLine := findLastLine(bodyNode)
+				if endLine == 0 || endLine < node.Line {
+					// If body has no line numbers, set to a very large number
+					// This ensures all lines in the function are included
+					endLine = 999999
+				}
+				st.CurrentScope.EndLine = endLine
+				debugLog.Printf("Function '%s' scope EndLine set to %d", funcName, endLine)
 			}
 		}
 
@@ -417,6 +441,8 @@ func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
 			symbol.Fields = st.extractObjectLiteralFields(node.Children[0])
 		}
 		
+		debugLog.Printf("Adding variable '%s' (type: %s) to scope at line %d (scope lines: %d-%d)", 
+			varName, varType, node.Line, st.CurrentScope.StartLine, st.CurrentScope.EndLine)
 		st.AddSymbol(symbol)
 
 		// Walk the value expression
@@ -735,8 +761,9 @@ func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
 						Kind:   SymbolKindVariable,
 						Type:   "any", // Could be inferred from array type
 						Line:   loopVar.Line,
-						Column: 0,
+						Column: loopVar.Column,
 					}
+					debugLog.Printf("Adding loop variable '%s' at line %d col %d", loopVar.Value, loopVar.Line, loopVar.Column)
 					st.AddSymbol(symbol)
 				}
 			}
@@ -752,8 +779,9 @@ func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
 						Kind:   SymbolKindVariable,
 						Type:   "string",
 						Line:   keyVar.Line,
-						Column: 0,
+						Column: keyVar.Column,
 					}
+					debugLog.Printf("Adding loop key variable '%s' at line %d col %d", keyVar.Value, keyVar.Line, keyVar.Column)
 					st.AddSymbol(symbol)
 				}
 				if valueVar.Type == ahoy.NODE_IDENTIFIER {
@@ -762,8 +790,9 @@ func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
 						Kind:   SymbolKindVariable,
 						Type:   "any",
 						Line:   valueVar.Line,
-						Column: 0,
+						Column: valueVar.Column,
 					}
+					debugLog.Printf("Adding loop value variable '%s' at line %d col %d", valueVar.Value, valueVar.Line, valueVar.Column)
 					st.AddSymbol(symbol)
 				}
 			}
@@ -777,8 +806,9 @@ func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
 					Kind:   SymbolKindVariable,
 					Type:   "int",
 					Line:   loopVar.Line,
-					Column: 0,
+					Column: loopVar.Column,
 				}
+				debugLog.Printf("Adding range loop variable '%s' at line %d col %d", loopVar.Value, loopVar.Line, loopVar.Column)
 				st.AddSymbol(symbol)
 			}
 
@@ -791,8 +821,9 @@ func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
 					Kind:   SymbolKindVariable,
 					Type:   "int",
 					Line:   loopVar.Line,
-					Column: 0,
+					Column: loopVar.Column,
 				}
+				debugLog.Printf("Adding while loop variable '%s' at line %d col %d", loopVar.Value, loopVar.Line, loopVar.Column)
 				st.AddSymbol(symbol)
 			}
 
@@ -805,8 +836,9 @@ func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
 					Kind:   SymbolKindVariable,
 					Type:   "int",
 					Line:   loopVar.Line,
-					Column: 0,
+					Column: loopVar.Column,
 				}
+				debugLog.Printf("Adding count loop variable '%s' at line %d col %d", loopVar.Value, loopVar.Line, loopVar.Column)
 				st.AddSymbol(symbol)
 			}
 		}
