@@ -137,6 +137,50 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 					}
 					return reply(ctx, result, nil)
 				}
+				
+				// Check if this is a C enum type (e.g., ConfigFlags.)
+				// Check in global header
+				if doc.CHeaderGlobal != nil {
+					if cEnum, ok := doc.CHeaderGlobal.Enums[possibleNamespace]; ok {
+						// Yes! Provide enum member completions
+						items := []protocol.CompletionItem{}
+						for valueName, value := range cEnum.Values {
+							if prefix == "" || strings.HasPrefix(valueName, prefix) {
+								items = append(items, protocol.CompletionItem{
+									Label:  valueName,
+									Kind:   protocol.CompletionItemKindEnumMember,
+									Detail: fmt.Sprintf("= %d", value),
+								})
+							}
+						}
+						result := protocol.CompletionList{
+							IsIncomplete: false,
+							Items:        items,
+						}
+						return reply(ctx, result, nil)
+					}
+				}
+				
+				// Check in namespaced headers
+				for _, headerInfo := range doc.CHeaders {
+					if cEnum, ok := headerInfo.Enums[possibleNamespace]; ok {
+						items := []protocol.CompletionItem{}
+						for valueName, value := range cEnum.Values {
+							if prefix == "" || strings.HasPrefix(valueName, prefix) {
+								items = append(items, protocol.CompletionItem{
+									Label:  valueName,
+									Kind:   protocol.CompletionItemKindEnumMember,
+									Detail: fmt.Sprintf("= %d", value),
+								})
+							}
+						}
+						result := protocol.CompletionList{
+							IsIncomplete: false,
+							Items:        items,
+						}
+						return reply(ctx, result, nil)
+					}
+				}
 			}
 		}
 	}
@@ -448,10 +492,13 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 			}
 		}
 
-		// Add variables in scope
-		for _, sym := range symbolTable.GlobalScope.Symbols {
+		// Add variables in scope (including local variables)
+		visibleSymbols := symbolTable.GetVisibleSymbols(int(params.Position.Line) + 1)
+		debugLog.Printf("Completion: Found %d visible symbols at line %d, prefix='%s'", len(visibleSymbols), int(params.Position.Line)+1, prefix)
+		for _, sym := range visibleSymbols {
 			if sym.Kind == SymbolKindVariable {
 				if prefix == "" || strings.HasPrefix(sym.Name, prefix) {
+					debugLog.Printf("Completion: Adding variable '%s' (type: %s)", sym.Name, sym.Type)
 					items = append(items, protocol.CompletionItem{
 						Label:  sym.Name,
 						Kind:   protocol.CompletionItemKindVariable,
@@ -462,7 +509,7 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 		}
 
 		// Add constants in scope
-		for _, sym := range symbolTable.GlobalScope.Symbols {
+		for _, sym := range visibleSymbols {
 			if sym.Kind == SymbolKindConstant {
 				if prefix == "" || strings.HasPrefix(sym.Name, prefix) {
 					items = append(items, protocol.CompletionItem{
@@ -475,7 +522,7 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 		}
 
 		// Add enum values
-		for _, sym := range symbolTable.GlobalScope.Symbols {
+		for _, sym := range visibleSymbols {
 			if sym.Kind == SymbolKindEnumValue {
 				if prefix == "" || strings.HasPrefix(sym.Name, prefix) {
 					items = append(items, protocol.CompletionItem{
@@ -542,9 +589,12 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 		}
 		
 		// Add global C enum VALUES (not enum names)
-		for _, enum := range doc.CHeaderGlobal.Enums {
+		debugLog.Printf("Completion: Checking C enum values, have %d enums, prefix='%s'", len(doc.CHeaderGlobal.Enums), prefix)
+		for enumName, enum := range doc.CHeaderGlobal.Enums {
+			debugLog.Printf("Completion: Processing enum %s with %d values", enumName, len(enum.Values))
 			for valueName, value := range enum.Values {
 				if prefix == "" || strings.HasPrefix(valueName, prefix) {
+					debugLog.Printf("Completion: Adding enum value %s = %d", valueName, value)
 					items = append(items, protocol.CompletionItem{
 						Label:  valueName,
 						Kind:   protocol.CompletionItemKindEnumMember,

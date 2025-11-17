@@ -241,6 +241,30 @@ func (st *SymbolTable) findScopeAtPosition(scope *Scope, line int) *Scope {
 	return nil
 }
 
+// GetVisibleSymbols returns all symbols visible at the given position
+func (st *SymbolTable) GetVisibleSymbols(line int) map[string]*Symbol {
+	result := make(map[string]*Symbol)
+	
+	// Find the scope at this position
+	scope := st.findScopeAtPosition(st.GlobalScope, line)
+	if scope == nil {
+		scope = st.GlobalScope
+	}
+	
+	// Collect symbols from current scope and all parent scopes
+	for scope != nil {
+		for name, sym := range scope.Symbols {
+			// Only add if not already present (inner scopes shadow outer scopes)
+			if _, exists := result[name]; !exists {
+				result[name] = sym
+			}
+		}
+		scope = scope.Parent
+	}
+	
+	return result
+}
+
 func (st *SymbolTable) FindSymbolAtPosition(line, column int) *Symbol {
 	return st.findSymbolInScope(st.GlobalScope, line, column)
 }

@@ -212,8 +212,16 @@ func (s *Server) handleDidOpen(ctx context.Context, reply jsonrpc2.Replier, req 
 		// Extract C header imports
 		debugLog.Printf("Extracting C header imports...")
 		doc.CHeaders, doc.CHeaderGlobal = extractCHeaderInfo(doc.AST)
-		debugLog.Printf("C headers extracted: %d namespaced, global has %d functions", 
-			len(doc.CHeaders), len(doc.CHeaderGlobal.Functions))
+		debugLog.Printf("C headers extracted: %d namespaced, global has %d functions, %d enums, %d defines", 
+			len(doc.CHeaders), len(doc.CHeaderGlobal.Functions), len(doc.CHeaderGlobal.Enums), len(doc.CHeaderGlobal.Defines))
+		
+		// Debug: List enum names
+		if len(doc.CHeaderGlobal.Enums) > 0 {
+			debugLog.Printf("Global C enums loaded:")
+			for enumName, enum := range doc.CHeaderGlobal.Enums {
+				debugLog.Printf("  - %s (%d values)", enumName, len(enum.Values))
+			}
+		}
 	} else {
 		doc.SymbolTable = NewSymbolTable()
 		doc.CHeaders = make(map[string]*ahoy.CHeaderInfo)

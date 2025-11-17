@@ -58,7 +58,16 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 		for _, cEnum := range doc.CHeaderGlobal.Enums {
 			if _, ok := cEnum.Values[word]; ok {
 				foundEnumValue = true
-				enumLineNum = cEnum.Line
+				// Try to get the specific line for this enum value
+				if cEnum.ValueLines != nil {
+					if valueLine, exists := cEnum.ValueLines[word]; exists {
+						enumLineNum = valueLine
+					} else {
+						enumLineNum = cEnum.Line
+					}
+				} else {
+					enumLineNum = cEnum.Line
+				}
 				// Find the header file path from imports
 				for _, child := range doc.AST.Children {
 					if child.Type == ahoy.NODE_IMPORT_STATEMENT && strings.HasSuffix(child.Value, ".h") {
