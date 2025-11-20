@@ -93,6 +93,18 @@ func (s *Server) Handle(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc
 		return s.handleDocumentSymbol(ctx, reply, req)
 	case protocol.MethodTextDocumentCodeAction:
 		return s.handleCodeAction(ctx, reply, req)
+	case protocol.MethodTextDocumentReferences:
+		return s.handleReferences(ctx, reply, req)
+	case protocol.MethodTextDocumentPrepareRename:
+		return s.handlePrepareRename(ctx, reply, req)
+	case protocol.MethodTextDocumentRename:
+		return s.handleRename(ctx, reply, req)
+	case protocol.MethodTextDocumentTypeDefinition:
+		return s.handleTypeDefinition(ctx, reply, req)
+	case protocol.MethodTextDocumentDeclaration:
+		return s.handleDeclaration(ctx, reply, req)
+	case protocol.MethodTextDocumentFormatting:
+		return s.handleFormatting(ctx, reply, req)
 	default:
 		return reply(ctx, nil, jsonrpc2.ErrMethodNotFound)
 	}
@@ -113,9 +125,16 @@ func (s *Server) handleInitialize(ctx context.Context, reply jsonrpc2.Replier, r
 			CompletionProvider: &protocol.CompletionOptions{
 				TriggerCharacters: []string{".", ":", " "},
 			},
-			DefinitionProvider:     true,
-			HoverProvider:          true,
-			DocumentSymbolProvider: true,
+			DefinitionProvider:         true,
+			TypeDefinitionProvider:     true,
+			DeclarationProvider:        true,
+			HoverProvider:              true,
+			DocumentSymbolProvider:     true,
+			ReferencesProvider:         true,
+			RenameProvider: protocol.RenameOptions{
+				PrepareProvider: true,
+			},
+			DocumentFormattingProvider: true,
 			CodeActionProvider: protocol.CodeActionOptions{
 				CodeActionKinds: []protocol.CodeActionKind{
 					protocol.QuickFix,
