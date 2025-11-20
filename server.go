@@ -17,19 +17,20 @@ import (
 )
 
 type Document struct {
-	URI            uri.URI
-	Content        string
-	Lines          []string // Cached split lines
-	Version        int32
-	Tokens         []ahoy.Token
-	AST            *ahoy.ASTNode
-	Errors         []ahoy.ParseError
-	SymbolTable    *SymbolTable
-	CHeaders       map[string]*ahoy.CHeaderInfo // namespace -> C header info
-	CHeaderGlobal  *ahoy.CHeaderInfo             // Global C header imports
-	ProgramName    string                        // Program name from declaration (empty if script)
-	PackageFiles   map[uri.URI]*PackageFile      // Other files in the same package
-	PackageSymbols *SymbolTable                  // Merged symbol table from all package files
+	URI             uri.URI
+	Content         string
+	Lines           []string // Cached split lines
+	Version         int32
+	Tokens          []ahoy.Token
+	AST             *ahoy.ASTNode
+	Errors          []ahoy.ParseError
+	SymbolTable     *SymbolTable
+	CHeaders        map[string]*ahoy.CHeaderInfo // namespace -> C header info
+	CHeaderGlobal   *ahoy.CHeaderInfo             // Global C header imports
+	ProgramName     string                        // Program name from declaration (empty if script)
+	PackageFiles    map[uri.URI]*PackageFile      // Other files in the same package
+	PackageSymbols  *SymbolTable                  // Merged symbol table from all package files
+	InferredParams  map[string][]string           // function name -> inferred parameter types
 }
 
 type PackageFile struct {
@@ -204,8 +205,13 @@ func (s *Server) handleDidOpen(ctx context.Context, reply jsonrpc2.Replier, req 
 
 	// Build symbol table - only if AST exists
 	if doc.AST != nil {
+		// Infer parameter types FIRST (before symbol table)
+		debugLog.Printf("Inferring parameter types...")
+		doc.InferredParams = inferParameterTypes(doc.AST, doc)
+		debugLog.Printf("Parameter types inferred for %d functions", len(doc.InferredParams))
+		
 		debugLog.Printf("Building symbol table...")
-		doc.SymbolTable = BuildSymbolTable(doc.AST)
+		doc.SymbolTable = BuildSymbolTable(doc.AST, doc.InferredParams)
 		doc.SymbolTable.Doc = doc // Set document reference
 		debugLog.Printf("Symbol table built")
 		
@@ -349,7 +355,9 @@ func (s *Server) handleDidChange(ctx context.Context, reply jsonrpc2.Replier, re
 
 		// Rebuild symbol table - only if AST exists
 		if doc.AST != nil {
-			doc.SymbolTable = BuildSymbolTable(doc.AST)
+			// Infer parameter types first
+			doc.InferredParams = inferParameterTypes(doc.AST, doc)
+			doc.SymbolTable = BuildSymbolTable(doc.AST, doc.InferredParams)
 			doc.SymbolTable.Doc = doc // Set document reference
 			// Extract C header imports
 			doc.CHeaders, doc.CHeaderGlobal = extractCHeaderInfo(doc.AST)

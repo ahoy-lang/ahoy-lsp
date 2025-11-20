@@ -146,10 +146,11 @@ func (s *Scope) TypesCompatible(expected, actual string) bool {
 
 // SymbolTable manages all symbols in a document
 type SymbolTable struct {
-	GlobalScope  *Scope
-	CurrentScope *Scope
-	AST          *ahoy.ASTNode // Store AST root for function lookups
-	Doc          *Document     // Store document for type inference
+	GlobalScope    *Scope
+	CurrentScope   *Scope
+	AST            *ahoy.ASTNode       // Store AST root for function lookups
+	Doc            *Document           // Store document for type inference
+	InferredParams map[string][]string // function name -> inferred parameter types
 }
 
 func NewSymbolTable() *SymbolTable {
@@ -304,13 +305,19 @@ func (st *SymbolTable) findSymbolInScope(scope *Scope, line, column int) *Symbol
 }
 
 // BuildSymbolTable walks the AST and builds the symbol table
-func BuildSymbolTable(ast *ahoy.ASTNode) *SymbolTable {
+func BuildSymbolTable(ast *ahoy.ASTNode, inferredParams ...map[string][]string) *SymbolTable {
 	if ast == nil {
 		return NewSymbolTable()
 	}
 
 	st := NewSymbolTable()
 	st.AST = ast // Store AST for lookups
+	
+	// Store inferred parameter types if provided
+	if len(inferredParams) > 0 {
+		st.InferredParams = inferredParams[0]
+	}
+	
 	st.walkNode(ast, 0)
 	return st
 }
@@ -378,21 +385,34 @@ func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
 			params := node.Children[0]
 			if params != nil && params.Type == ahoy.NODE_BLOCK {
 				// Each parameter is a NODE_IDENTIFIER with Value=name and DataType=type
-				for _, paramNode := range params.Children {
+				for paramIdx, paramNode := range params.Children {
 					if paramNode.Type == ahoy.NODE_IDENTIFIER {
 						// Use function line for parameters since they're part of the function signature
 						paramLine := node.Line
 						if paramNode.Line > 0 {
 							paramLine = paramNode.Line
 						}
+						
+						// Get parameter type - use explicit type if provided, otherwise inferred
+						paramType := paramNode.DataType
+						if (paramType == "" || paramType == "generic") && st.InferredParams != nil {
+							if inferredTypes, exists := st.InferredParams[funcName]; exists && paramIdx < len(inferredTypes) {
+								inferredType := inferredTypes[paramIdx]
+								if inferredType != "generic" && inferredType != "" {
+									paramType = inferredType
+									debugLog.Printf("Using inferred type '%s' for parameter '%s' in function '%s'", paramType, paramNode.Value, funcName)
+								}
+							}
+						}
+						
 						paramSymbol := &Symbol{
 							Name:   paramNode.Value,
 							Kind:   SymbolKindParameter,
-							Type:   paramNode.DataType,
+							Type:   paramType,
 							Line:   paramLine,
 							Column: paramNode.Column,
 						}
-						debugLog.Printf("Adding parameter '%s' (type: %s) at line %d col %d to function scope", paramNode.Value, paramNode.DataType, paramLine, paramNode.Column)
+						debugLog.Printf("Adding parameter '%s' (type: %s) at line %d col %d to function scope", paramNode.Value, paramType, paramLine, paramNode.Column)
 						st.AddSymbol(paramSymbol)
 					}
 				}
