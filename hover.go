@@ -228,6 +228,17 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 			}
 		}
 	}
+	
+	// Check if it's a built-in method (array, dict, or string)
+	if hoverText := getMethodHover(word); hoverText != "" {
+		hover := protocol.Hover{
+			Contents: protocol.MarkupContent{
+				Kind:  protocol.Markdown,
+				Value: hoverText,
+			},
+		}
+		return reply(ctx, hover, nil)
+	}
 
 	// Look up Ahoy symbol in the symbol table
 	// Use PackageSymbols if available (for multi-file packages), otherwise use regular SymbolTable
@@ -458,5 +469,71 @@ func getKeywordHover(keyword string) string {
 	if doc, ok := keywordDocs[keyword]; ok {
 		return doc
 	}
+	return ""
+}
+
+func getMethodHover(method string) string {
+	// Array methods
+	arrayMethods := map[string]string{
+		"push":    "**push** - Add element(s) to array\n\nSyntax: `arr.push|value|` or `arr.push|val1, val2, ...|`\n\nReturns: Modified array",
+		"pop":     "**pop** - Remove and return last element\n\nSyntax: `arr.pop||`\n\nReturns: Removed element",
+		"length":  "**length** - Get array length\n\nSyntax: `arr.length||`\n\nReturns: Integer",
+		"sum":     "**sum** - Sum all numeric elements\n\nSyntax: `arr.sum||`\n\nReturns: Integer",
+		"has":     "**has** - Check if array contains value\n\nSyntax: `arr.has|value|`\n\nReturns: Boolean (0 or 1)",
+		"sort":    "**sort** - Sort array in ascending order\n\nSyntax: `arr.sort||`\n\nReturns: Modified array",
+		"reverse": "**reverse** - Reverse array order\n\nSyntax: `arr.reverse||`\n\nReturns: Modified array",
+		"shuffle": "**shuffle** - Randomly shuffle array\n\nSyntax: `arr.shuffle||`\n\nReturns: Modified array",
+		"pick":    "**pick** - Get random element\n\nSyntax: `arr.pick||`\n\nReturns: Random element",
+		"fill":    "**fill** - Fill array with value\n\nSyntax: `arr.fill|value, count|`\n\nExample: `[].fill|-1, 4|` creates `[-1, -1, -1, -1]`\n\nReturns: Filled array",
+		"map":     "**map** - Transform each element\n\nSyntax: `arr.map|lambda|`\n\nExample: `[1,2,3].map|x => x * 2|`\n\nReturns: New array",
+		"filter":  "**filter** - Keep elements matching condition\n\nSyntax: `arr.filter|lambda|`\n\nExample: `[1,2,3,4].filter|x => x > 2|`\n\nReturns: New array",
+	}
+	
+	// Dictionary methods
+	dictMethods := map[string]string{
+		"size":        "**size** - Get number of key-value pairs\n\nSyntax: `dict.size||`\n\nReturns: Integer",
+		"has":         "**has** - Check if key exists\n\nSyntax: `dict.has|key|`\n\nReturns: Boolean",
+		"has_all":     "**has_all** - Check if all keys exist\n\nSyntax: `dict.has_all|key1, key2, ...|`\n\nReturns: Boolean",
+		"keys":        "**keys** - Get array of all keys\n\nSyntax: `dict.keys||`\n\nReturns: Array of strings",
+		"values":      "**values** - Get array of all values\n\nSyntax: `dict.values||`\n\nReturns: Array",
+		"clear":       "**clear** - Remove all entries\n\nSyntax: `dict.clear||`\n\nReturns: Void",
+		"remove":      "**remove** - Delete key-value pair\n\nSyntax: `dict.remove|key|`\n\nReturns: Void",
+		"merge":       "**merge** - Combine with another dict\n\nSyntax: `dict1.merge|dict2|`\n\nReturns: Merged dictionary",
+		"sort":        "**sort** - Sort dict by keys\n\nSyntax: `dict.sort||`\n\nReturns: Sorted dictionary",
+		"stable_sort": "**stable_sort** - Stable sort by keys\n\nSyntax: `dict.stable_sort||`\n\nReturns: Sorted dictionary",
+	}
+	
+	// String methods
+	stringMethods := map[string]string{
+		"length":      "**length** - Get string length\n\nSyntax: `str.length||`\n\nReturns: Integer",
+		"upper":       "**upper** - Convert to uppercase\n\nSyntax: `str.upper||`\n\nReturns: String",
+		"lower":       "**lower** - Convert to lowercase\n\nSyntax: `str.lower||`\n\nReturns: String",
+		"replace":     "**replace** - Replace substring\n\nSyntax: `str.replace|old, new|`\n\nReturns: Modified string",
+		"contains":    "**contains** - Check if contains substring\n\nSyntax: `str.contains|substr|`\n\nReturns: Boolean",
+		"match":       "**match** - Check if matches pattern\n\nSyntax: `str.match|pattern|`\n\nReturns: Boolean",
+		"split":       "**split** - Split into array\n\nSyntax: `str.split|delimiter|`\n\nReturns: Array of strings",
+		"count":       "**count** - Count substring occurrences\n\nSyntax: `str.count|substr|`\n\nReturns: Integer",
+		"camel_case":  "**camel_case** - Convert to camelCase\n\nSyntax: `str.camel_case||`\n\nReturns: String",
+		"snake_case":  "**snake_case** - Convert to snake_case\n\nSyntax: `str.snake_case||`\n\nReturns: String",
+		"pascal_case": "**pascal_case** - Convert to PascalCase\n\nSyntax: `str.pascal_case||`\n\nReturns: String",
+		"kebab_case":  "**kebab_case** - Convert to kebab-case\n\nSyntax: `str.kebab_case||`\n\nReturns: String",
+		"lpad":        "**lpad** - Pad left to width\n\nSyntax: `str.lpad|width, padchar|`\n\nReturns: Padded string",
+		"rpad":        "**rpad** - Pad right to width\n\nSyntax: `str.rpad|width, padchar|`\n\nReturns: Padded string",
+		"pad":         "**pad** - Pad both sides to width\n\nSyntax: `str.pad|width, padchar|`\n\nReturns: Padded string",
+		"strip":       "**strip** - Remove leading/trailing whitespace\n\nSyntax: `str.strip||`\n\nReturns: Trimmed string",
+		"get_file":    "**get_file** - Extract filename from path\n\nSyntax: `path.get_file||`\n\nReturns: Filename string",
+	}
+	
+	// Check all method types
+	if doc, ok := arrayMethods[method]; ok {
+		return fmt.Sprintf("```ahoy\n%s\n```\n\n%s\n\n**Array Method**", method, doc)
+	}
+	if doc, ok := dictMethods[method]; ok {
+		return fmt.Sprintf("```ahoy\n%s\n```\n\n%s\n\n**Dictionary Method**", method, doc)
+	}
+	if doc, ok := stringMethods[method]; ok {
+		return fmt.Sprintf("```ahoy\n%s\n```\n\n%s\n\n**String Method**", method, doc)
+	}
+	
 	return ""
 }

@@ -158,6 +158,37 @@ func checkStructMemberAccess(doc *Document) []protocol.Diagnostic {
 									}
 									diagnostics = append(diagnostics, diagnostic)
 								} else {
+									// Check if field is const (SCREAMING_SNAKE_CASE)
+									finalPropName := propParts[len(propParts)-1]
+									if isScreamingSnakeCase(finalPropName) {
+										lineText := ""
+										if node.Line > 0 && node.Line <= len(doc.Lines) {
+											lineText = doc.Lines[node.Line-1]
+										}
+										endChar := uint32(len(lineText))
+										if endChar == 0 {
+											endChar = 50
+										}
+
+										diagnostic := protocol.Diagnostic{
+											Range: protocol.Range{
+												Start: protocol.Position{
+													Line:      uint32(node.Line - 1),
+													Character: 0,
+												},
+												End: protocol.Position{
+													Line:      uint32(node.Line - 1),
+													Character: endChar,
+												},
+											},
+											Severity: protocol.DiagnosticSeverityError,
+											Source:   "ahoy",
+											Message:  "trying to assign value to const property '" + finalPropName + "'",
+											Code:     "const-assignment",
+										}
+										diagnostics = append(diagnostics, diagnostic)
+									}
+									
 									// Check type compatibility
 									if len(node.Children) > 0 {
 										actualType := inferExpressionType(node.Children[0], doc)
@@ -357,4 +388,30 @@ func checkObjectPropertyAssignment(doc *Document) []protocol.Diagnostic {
 
 	checkNode(doc.AST)
 	return diagnostics
+}
+
+// isScreamingSnakeCase checks if a string is in SCREAMING_SNAKE_CASE (all uppercase with underscores)
+
+
+// isScreamingSnakeCase checks if a string is in SCREAMING_SNAKE_CASE (all uppercase with underscores)
+func isScreamingSnakeCase(s string) bool {
+	if len(s) == 0 {
+		return false
+	}
+	
+	// Must have at least one uppercase letter
+	hasUpper := false
+	for _, ch := range s {
+		if ch >= 'A' && ch <= 'Z' {
+			hasUpper = true
+		} else if ch >= 'a' && ch <= 'z' {
+			// Has lowercase, not screaming snake case
+			return false
+		} else if ch != '_' && (ch < '0' || ch > '9') {
+			// Has character that's not uppercase, underscore, or digit
+			return false
+		}
+	}
+	
+	return hasUpper
 }

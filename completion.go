@@ -229,20 +229,20 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 					beforePrefixType = "array"
 					isDotCompletion = true
 				}
-			} else if identEnd >= 0 && currentLine[identEnd] == '}' {
-				// Check if it's a dict literal {...}
-				braceCount := 1
+			} else if identEnd >= 0 && currentLine[identEnd] == '>' {
+				// Check if it's a dict literal <...>
+				angleCount := 1
 				identStart = identEnd - 1
-				for identStart >= 0 && braceCount > 0 {
-					if currentLine[identStart] == '}' {
-						braceCount++
-					} else if currentLine[identStart] == '{' {
-						braceCount--
+				for identStart >= 0 && angleCount > 0 {
+					if currentLine[identStart] == '>' {
+						angleCount++
+					} else if currentLine[identStart] == '<' {
+						angleCount--
 					}
 					identStart--
 				}
-				identStart++ // Move back to the '{'
-				if identStart >= 0 && currentLine[identStart] == '{' {
+				identStart++ // Move back to the '<'
+				if identStart >= 0 && currentLine[identStart] == '<' {
 					beforePrefix = currentLine[identStart : identEnd+1]
 					beforePrefixType = "dict"
 					isDotCompletion = true
@@ -694,12 +694,17 @@ func addArrayMethods(items []protocol.CompletionItem, prefix string) []protocol.
 		{"pop", "Remove last element", "Removes and returns the last element", "||"},
 		{"sort", "Sort array", "Sorts the array in place", "||"},
 		{"reverse", "Reverse array", "Reverses the array in place", "||"},
+		{"shuffle", "Shuffle array", "Randomly shuffles the array in place", "||"},
+		{"pick", "Pick random element", "Returns a random element from the array", "||"},
 		{"contains", "Check if contains", "Returns true if array contains element", "|element|"},
+		{"has", "Check if has element", "Returns true if array has the element", "|element|"},
+		{"sum", "Sum elements", "Returns the sum of all numeric elements", "||"},
 		{"find", "Find element", "Returns index of element or -1", "|element|"},
 		{"filter", "Filter array", "Returns new array with elements matching condition", "|condition|"},
 		{"map", "Map array", "Returns new array with transformed elements", "|transform|"},
 		{"join", "Join to string", "Joins array elements into a string", "|separator|"},
 		{"slice", "Get subarray", "Returns a portion of the array", "|start, end|"},
+		{"fill", "Fill array", "Creates array filled with value. Example: [].fill|-1, 4|", "|value, count|"},
 	}
 	
 	for _, method := range arrayMethods {
@@ -730,6 +735,7 @@ func addDictMethods(items []protocol.CompletionItem, prefix string) []protocol.C
 		{"has_all", "Check if all keys exist", "Returns true if all keys in the array exist", "|keys_array|"},
 		{"keys", "Get all keys", "Returns an array of all dictionary keys", "||"},
 		{"values", "Get all values", "Returns an array of all dictionary values", "||"},
+		{"remove", "Remove key", "Removes a key-value pair from the dictionary", "|key|"},
 		{"sort", "Sort by keys", "Returns a new dictionary sorted by keys", "||"},
 		{"stable_sort", "Stable sort by keys", "Returns a new dictionary with stable sort by keys", "||"},
 		{"merge", "Merge dictionaries", "Merges another dictionary into this one", "|other_dict|"},

@@ -494,6 +494,7 @@ func getValidArrayMethods() []string {
 	return []string{
 		"length", "push", "pop", "sort", "reverse", "contains",
 		"find", "filter", "map", "join", "slice", "sum", "has",
+		"fill", "shuffle", "pick",
 	}
 }
 
@@ -501,7 +502,7 @@ func getValidArrayMethods() []string {
 func getValidDictMethods() []string {
 	return []string{
 		"size", "clear", "has", "has_all", "keys", "values",
-		"sort", "stable_sort", "merge",
+		"remove", "sort", "stable_sort", "merge",
 	}
 }
 

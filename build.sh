@@ -4,12 +4,12 @@ set -e
 
 echo "Building Ahoy Language Server..."
 
-if pgrep "zed" > /dev/null; then
-    echo "zed is running. Killing it..."
-    killall zed-editor
-    killall ahoy-lsp
-fi
+# if pgrep "zed" > /dev/null; then
+    # echo "zed is running. Killing it..."
+    # killall zed-editor
+# fi
 
+killall ahoy-lsp
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
@@ -47,9 +47,9 @@ if [ -f "ahoy-lsp" ]; then
     echo "Verify installation:"
     echo "  which ahoy-lsp"
     echo ""
-    if ! pgrep -x "zed-editor" >/dev/null; then
-	    zed "$HOME/Documents/ahoy-lang"
-		fi
+  #   if ! pgrep -x "zed-editor" >/dev/null; then
+	 #    zed "$HOME/Documents/ahoy-lang"
+		# fi
 else
     echo "Build failed!"
     exit 1
