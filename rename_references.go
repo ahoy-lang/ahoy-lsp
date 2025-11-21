@@ -231,6 +231,8 @@ func (s *Server) findAllReferences(doc *Document, name string, kind SymbolKind) 
 
 	// Track which positions we've already added to avoid duplicates
 	addedPositions := make(map[string]bool)
+	// Track which lines we've fully searched (when no column info)
+	searchedLines := make(map[int]bool)
 
 	// Walk the AST to find all uses of the symbol
 	var walk func(*ahoy.ASTNode)
@@ -297,29 +299,49 @@ func (s *Server) findAllReferences(doc *Document, name string, kind SymbolKind) 
 			lineIndex := node.Line - 1
 			line := doc.Lines[lineIndex]
 			
-			// Search for ALL occurrences of the symbol on this line
-			// This handles: tabs, spaces, indentation, multiple vars per line
-			for i := 0; i <= len(line)-len(name); i++ {
-				// Check if we found the name at position i
-				if strings.HasPrefix(line[i:], name) {
-					// Verify it's a complete word (check boundaries including underscores)
-					isWordStart := i == 0 || !isIdentifierCharRename(rune(line[i-1]))
-					isWordEnd := i+len(name) >= len(line) || !isIdentifierCharRename(rune(line[i+len(name)]))
-					
-					if isWordStart && isWordEnd {
-						// Create unique key for this position
-						posKey := fmt.Sprintf("%d:%d", lineIndex, i)
+			// Use the node's column if available, otherwise search for all occurrences
+			if node.Column > 0 {
+				// Node has column information, use it directly
+				// Column is 1-based, LSP expects 0-based
+				charPos := node.Column - 1
+				posKey := fmt.Sprintf("%d:%d", lineIndex, charPos)
+				
+				if !addedPositions[posKey] {
+					addedPositions[posKey] = true
+					locations = append(locations, protocol.Location{
+						URI: doc.URI,
+						Range: protocol.Range{
+							Start: protocol.Position{Line: uint32(lineIndex), Character: uint32(charPos)},
+							End:   protocol.Position{Line: uint32(lineIndex), Character: uint32(charPos + len(name))},
+						},
+					})
+				}
+			} else if !searchedLines[lineIndex] {
+				// No column info, search for ALL occurrences on this line
+				// Only do this once per line to avoid duplicates
+				searchedLines[lineIndex] = true
+				
+				for i := 0; i <= len(line)-len(name); i++ {
+					if strings.HasPrefix(line[i:], name) {
+						// Verify it's a complete word (check boundaries including underscores)
+						isWordStart := i == 0 || !isIdentifierCharRename(rune(line[i-1]))
+						isWordEnd := i+len(name) >= len(line) || !isIdentifierCharRename(rune(line[i+len(name)]))
 						
-						// Only add if we haven't added this position yet
-						if !addedPositions[posKey] {
-							addedPositions[posKey] = true
-							locations = append(locations, protocol.Location{
-								URI: doc.URI,
-								Range: protocol.Range{
-									Start: protocol.Position{Line: uint32(lineIndex), Character: uint32(i)},
-									End:   protocol.Position{Line: uint32(lineIndex), Character: uint32(i + len(name))},
-								},
-							})
+						if isWordStart && isWordEnd {
+							// Create unique key for this position
+							posKey := fmt.Sprintf("%d:%d", lineIndex, i)
+							
+							// Only add if we haven't added this position yet
+							if !addedPositions[posKey] {
+								addedPositions[posKey] = true
+								locations = append(locations, protocol.Location{
+									URI: doc.URI,
+									Range: protocol.Range{
+										Start: protocol.Position{Line: uint32(lineIndex), Character: uint32(i)},
+										End:   protocol.Position{Line: uint32(lineIndex), Character: uint32(i + len(name))},
+									},
+								})
+							}
 						}
 					}
 				}

@@ -564,6 +564,19 @@ func checkInvalidMethodCalls(doc *Document) []protocol.Diagnostic {
 			if len(node.Children) > 0 {
 				target := node.Children[0]
 				
+				// Check if target is a namespace
+				if target != nil && target.Type == ahoy.NODE_IDENTIFIER {
+					if doc.CHeaders != nil {
+						if _, exists := doc.CHeaders[target.Value]; exists {
+							// This is a namespaced C function call, skip validation
+							for _, child := range node.Children {
+								checkNode(child, depth+1)
+							}
+							return
+						}
+					}
+				}
+				
 				// Determine the type of the target
 				var targetType string
 				if target != nil {
@@ -1426,6 +1439,19 @@ func checkUndeclaredIdentifiers(doc *Document) []protocol.Diagnostic {
 			
 			// Skip underscore - it's used as a wildcard/default case
 			if identifierName == "_" {
+				return
+			}
+			
+			// Check if this identifier is a namespace for C headers
+			isNamespace := false
+			if doc.CHeaders != nil {
+				if _, exists := doc.CHeaders[identifierName]; exists {
+					isNamespace = true
+				}
+			}
+			
+			// If it's a namespace, skip validation
+			if isNamespace {
 				return
 			}
 			
