@@ -17,20 +17,20 @@ import (
 )
 
 type Document struct {
-	URI             uri.URI
-	Content         string
-	Lines           []string // Cached split lines
-	Version         int32
-	Tokens          []ahoy.Token
-	AST             *ahoy.ASTNode
-	Errors          []ahoy.ParseError
-	SymbolTable     *SymbolTable
-	CHeaders        map[string]*ahoy.CHeaderInfo // namespace -> C header info
-	CHeaderGlobal   *ahoy.CHeaderInfo             // Global C header imports
-	ProgramName     string                        // Program name from declaration (empty if script)
-	PackageFiles    map[uri.URI]*PackageFile      // Other files in the same package
-	PackageSymbols  *SymbolTable                  // Merged symbol table from all package files
-	InferredParams  map[string][]string           // function name -> inferred parameter types
+	URI            uri.URI
+	Content        string
+	Lines          []string // Cached split lines
+	Version        int32
+	Tokens         []ahoy.Token
+	AST            *ahoy.ASTNode
+	Errors         []ahoy.ParseError
+	SymbolTable    *SymbolTable
+	CHeaders       map[string]*ahoy.CHeaderInfo // namespace -> C header info
+	CHeaderGlobal  *ahoy.CHeaderInfo            // Global C header imports
+	ProgramName    string                       // Program name from declaration (empty if script)
+	PackageFiles   map[uri.URI]*PackageFile     // Other files in the same package
+	PackageSymbols *SymbolTable                 // Merged symbol table from all package files
+	InferredParams map[string][]string          // function name -> inferred parameter types
 }
 
 type PackageFile struct {
@@ -125,12 +125,12 @@ func (s *Server) handleInitialize(ctx context.Context, reply jsonrpc2.Replier, r
 			CompletionProvider: &protocol.CompletionOptions{
 				TriggerCharacters: []string{".", ":", " "},
 			},
-			DefinitionProvider:         true,
-			TypeDefinitionProvider:     true,
-			DeclarationProvider:        true,
-			HoverProvider:              true,
-			DocumentSymbolProvider:     true,
-			ReferencesProvider:         true,
+			DefinitionProvider:     true,
+			TypeDefinitionProvider: true,
+			DeclarationProvider:    true,
+			HoverProvider:          true,
+			DocumentSymbolProvider: true,
+			ReferencesProvider:     true,
 			RenameProvider: protocol.RenameOptions{
 				PrepareProvider: true,
 			},
@@ -175,7 +175,7 @@ func (s *Server) handleDidOpen(ctx context.Context, reply jsonrpc2.Replier, req 
 	// Parse the document - handle panics gracefully with timeout
 	parseSuccess := false
 	parseDone := make(chan bool, 1)
-	
+
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -196,7 +196,12 @@ func (s *Server) handleDidOpen(ctx context.Context, reply jsonrpc2.Replier, req 
 
 		doc.Tokens = ahoy.Tokenize(doc.Content)
 		debugLog.Printf("Tokenized: %d tokens", len(doc.Tokens))
-		doc.AST, doc.Errors = ahoy.ParseLint(doc.Tokens)
+		// Convert URI to file path for relative import resolution
+		filePath := string(doc.URI)
+		if strings.HasPrefix(filePath, "file://") {
+			filePath = strings.TrimPrefix(filePath, "file://")
+		}
+		doc.AST, doc.Errors = ahoy.ParseLintWithPath(doc.Tokens, filePath)
 		debugLog.Printf("Parsed: %d errors", len(doc.Errors))
 		parseSuccess = true
 	}()
@@ -228,18 +233,18 @@ func (s *Server) handleDidOpen(ctx context.Context, reply jsonrpc2.Replier, req 
 		debugLog.Printf("Inferring parameter types...")
 		doc.InferredParams = inferParameterTypes(doc.AST, doc)
 		debugLog.Printf("Parameter types inferred for %d functions", len(doc.InferredParams))
-		
+
 		debugLog.Printf("Building symbol table...")
 		doc.SymbolTable = BuildSymbolTable(doc.AST, doc.InferredParams)
 		doc.SymbolTable.Doc = doc // Set document reference
 		debugLog.Printf("Symbol table built")
-		
+
 		// Extract C header imports
 		debugLog.Printf("Extracting C header imports...")
 		doc.CHeaders, doc.CHeaderGlobal = extractCHeaderInfo(doc.AST)
-		debugLog.Printf("C headers extracted: %d namespaced, global has %d functions, %d enums, %d defines", 
+		debugLog.Printf("C headers extracted: %d namespaced, global has %d functions, %d enums, %d defines",
 			len(doc.CHeaders), len(doc.CHeaderGlobal.Functions), len(doc.CHeaderGlobal.Enums), len(doc.CHeaderGlobal.Defines))
-		
+
 		// Debug: List enum names
 		if len(doc.CHeaderGlobal.Enums) > 0 {
 			debugLog.Printf("Global C enums loaded:")
@@ -324,7 +329,7 @@ func (s *Server) handleDidChange(ctx context.Context, reply jsonrpc2.Replier, re
 		// Reparse - handle panics gracefully with timeout
 		parseSuccess := false
 		parseDone := make(chan bool, 1)
-		
+
 		go func() {
 			defer func() {
 				if r := recover(); r != nil {
@@ -346,7 +351,12 @@ func (s *Server) handleDidChange(ctx context.Context, reply jsonrpc2.Replier, re
 			// Tokenize and parse
 			doc.Tokens = ahoy.Tokenize(doc.Content)
 			debugLog.Printf("Tokenized on change: %d tokens", len(doc.Tokens))
-			doc.AST, doc.Errors = ahoy.ParseLint(doc.Tokens)
+			// Convert URI to file path for relative import resolution
+			filePath := string(doc.URI)
+			if strings.HasPrefix(filePath, "file://") {
+				filePath = strings.TrimPrefix(filePath, "file://")
+			}
+			doc.AST, doc.Errors = ahoy.ParseLintWithPath(doc.Tokens, filePath)
 			debugLog.Printf("Parsed on change: %d errors", len(doc.Errors))
 			parseSuccess = true
 		}()
@@ -451,33 +461,35 @@ func extractCHeaderInfo(ast *ahoy.ASTNode) (map[string]*ahoy.CHeaderInfo, *ahoy.
 		Defines:   make(map[string]*ahoy.CDefine),
 		Structs:   make(map[string]*ahoy.CStruct),
 	}
-	
+
 	if ast == nil {
 		return cHeaders, cHeaderGlobal
 	}
-	
+
 	// Walk through top-level nodes looking for imports
 	for _, child := range ast.Children {
 		if child.Type == ahoy.NODE_IMPORT_STATEMENT {
 			path := child.Value
 			namespace := child.DataType // namespace stored in DataType field
-			
+
 			// Only process .h files
 			if !strings.HasSuffix(path, ".h") {
 				continue
 			}
-			
+
+			// Note: Path resolution is now handled in parser.go during ParseLintWithPath
+			// The path here should already be resolved if it was relative
 			// Parse the C header
 			headerInfo, err := ahoy.ParseCHeader(path)
 			if err != nil {
 				debugLog.Printf("Failed to parse C header %s: %v", path, err)
 				continue
 			}
-			
+
 			if namespace != "" {
 				// Store with namespace
 				cHeaders[namespace] = headerInfo
-				debugLog.Printf("Loaded C header %s with namespace '%s': %d functions, %d enums, %d structs", 
+				debugLog.Printf("Loaded C header %s with namespace '%s': %d functions, %d enums, %d structs",
 					path, namespace, len(headerInfo.Functions), len(headerInfo.Enums), len(headerInfo.Structs))
 			} else {
 				// Merge into global
@@ -493,12 +505,12 @@ func extractCHeaderInfo(ast *ahoy.ASTNode) (map[string]*ahoy.CHeaderInfo, *ahoy.
 				for name, str := range headerInfo.Structs {
 					cHeaderGlobal.Structs[name] = str
 				}
-				debugLog.Printf("Loaded C header %s globally: %d functions, %d enums, %d structs", 
+				debugLog.Printf("Loaded C header %s globally: %d functions, %d enums, %d structs",
 					path, len(headerInfo.Functions), len(headerInfo.Enums), len(headerInfo.Structs))
 			}
 		}
 	}
-	
+
 	return cHeaders, cHeaderGlobal
 }
 
@@ -507,13 +519,13 @@ func extractProgramName(ast *ahoy.ASTNode) string {
 	if ast == nil {
 		return ""
 	}
-	
+
 	for _, child := range ast.Children {
 		if child.Type == ahoy.NODE_PROGRAM_DECLARATION {
 			return child.Value
 		}
 	}
-	
+
 	return ""
 }
 
@@ -522,49 +534,50 @@ func (s *Server) loadPackageFiles(doc *Document) {
 	// Get directory from URI
 	filePath := string(doc.URI)[7:] // Remove "file://" prefix
 	dir := filePath[:strings.LastIndex(filePath, "/")]
-	
+
 	// Read directory
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		debugLog.Printf("Error reading directory %s: %v", dir, err)
 		return
 	}
-	
+
 	doc.PackageFiles = make(map[uri.URI]*PackageFile)
-	
+
 	// Load all .ahoy files with matching program name
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".ahoy") {
 			continue
 		}
-		
+
 		fileURI := uri.URI("file://" + dir + "/" + entry.Name())
-		
+
 		// Skip the current document
 		if fileURI == doc.URI {
 			continue
 		}
-		
+
 		// Read file content
 		content, err := os.ReadFile(dir + "/" + entry.Name())
 		if err != nil {
 			debugLog.Printf("Error reading file %s: %v", entry.Name(), err)
 			continue
 		}
-		
+
 		// Parse file
 		tokens := ahoy.Tokenize(string(content))
-		ast, _ := ahoy.ParseLint(tokens)
-		
+		filePath := dir + "/" + entry.Name()
+		ast, _ := ahoy.ParseLintWithPath(tokens, filePath)
+
 		// Check if it has the same program name
 		progName := extractProgramName(ast)
 		if progName != doc.ProgramName {
 			continue
 		}
-		
+
 		// Build symbol table for this file
 		symbols := BuildSymbolTable(ast)
-		
+
 		// Add to package files
 		doc.PackageFiles[fileURI] = &PackageFile{
 			URI:     fileURI,
@@ -572,25 +585,25 @@ func (s *Server) loadPackageFiles(doc *Document) {
 			AST:     ast,
 			Symbols: symbols,
 		}
-		
+
 		debugLog.Printf("Loaded package file: %s", entry.Name())
 	}
-	
+
 	// Merge symbol tables from all package files
 	doc.PackageSymbols = NewSymbolTable()
-	
+
 	// Add symbols from current file
 	if doc.SymbolTable != nil {
 		mergeSymbolTable(doc.PackageSymbols.GlobalScope, doc.SymbolTable.GlobalScope)
 	}
-	
+
 	// Add symbols from other package files
 	for _, pkgFile := range doc.PackageFiles {
 		if pkgFile.Symbols != nil {
 			mergeSymbolTable(doc.PackageSymbols.GlobalScope, pkgFile.Symbols.GlobalScope)
 		}
 	}
-	
+
 	debugLog.Printf("Merged package symbols from %d files", len(doc.PackageFiles)+1)
 }
 
@@ -599,7 +612,7 @@ func mergeSymbolTable(dst *Scope, src *Scope) {
 	if src == nil || dst == nil {
 		return
 	}
-	
+
 	// Copy all symbols from src to dst
 	for name, symbol := range src.Symbols {
 		// Only add if not already present (current file takes precedence)
@@ -607,7 +620,7 @@ func mergeSymbolTable(dst *Scope, src *Scope) {
 			dst.Symbols[name] = symbol
 		}
 	}
-	
+
 	// Recursively merge child scopes
 	for _, srcChild := range src.Children {
 		mergeSymbolTable(dst, srcChild)

@@ -76,11 +76,11 @@ func (s *Server) publishDiagnostics(ctx context.Context, doc *Document) {
 			// Check variable/constant type mismatches
 			typeMismatchDiags := checkTypeMismatches(doc)
 			diagnostics = append(diagnostics, typeMismatchDiags...)
-			
+
 			// Check struct member access and property validation
 			memberAccessDiags := checkStructMemberAccess(doc)
 			diagnostics = append(diagnostics, memberAccessDiags...)
-			
+
 			// Check object literal property assignment
 			objectPropDiags := checkObjectPropertyAssignment(doc)
 			diagnostics = append(diagnostics, objectPropDiags...)
@@ -563,7 +563,7 @@ func checkInvalidMethodCalls(doc *Document) []protocol.Diagnostic {
 			// Get the target (first child should be the object)
 			if len(node.Children) > 0 {
 				target := node.Children[0]
-				
+
 				// Check if target is a namespace
 				if target != nil && target.Type == ahoy.NODE_IDENTIFIER {
 					if doc.CHeaders != nil {
@@ -576,7 +576,7 @@ func checkInvalidMethodCalls(doc *Document) []protocol.Diagnostic {
 						}
 					}
 				}
-				
+
 				// Determine the type of the target
 				var targetType string
 				if target != nil {
@@ -625,7 +625,7 @@ func checkInvalidMethodCalls(doc *Document) []protocol.Diagnostic {
 					// Method doesn't exist - find similar method using Levenshtein distance
 					bestMatch := ""
 					bestDistance := 1000000
-					
+
 					for _, validMethod := range validMethods {
 						distance := levenshteinDistance(methodName, validMethod)
 						if distance < bestDistance {
@@ -636,14 +636,14 @@ func checkInvalidMethodCalls(doc *Document) []protocol.Diagnostic {
 
 					// Build error message
 					message := "Method '" + methodName + "' does not exist"
-					
+
 					// Suggest similar method if distance is reasonable
 					// Threshold: max 3 edits or 40% of method name length
 					threshold := 3
 					if len(methodName) > 7 {
 						threshold = (len(methodName) * 2) / 5
 					}
-					
+
 					if bestDistance <= threshold && bestMatch != "" {
 						message += ", did you mean '" + bestMatch + "'?"
 					}
@@ -1305,7 +1305,7 @@ func checkUndefinedFunctions(doc *Document) []protocol.Diagnostic {
 			if !isBuiltinFunction(funcName) {
 				sym := symbolTable.GlobalScope.Lookup(funcName)
 				isUserDefined := sym != nil && sym.Kind == SymbolKindFunction
-				
+
 				// Check if it's a C function (global import)
 				isCFunction := false
 				if doc.CHeaderGlobal != nil {
@@ -1316,10 +1316,10 @@ func checkUndefinedFunctions(doc *Document) []protocol.Diagnostic {
 						}
 					}
 				}
-				
+
 				// Also check namespaced C functions (e.g., rl.function_name)
 				// These would come through as method calls, but we'll handle them separately
-				
+
 				if !isUserDefined && !isCFunction {
 					// Function not found - find similar function
 					similarFunc, distance := findSimilarFunction(funcName, availableFuncs)
@@ -1391,7 +1391,7 @@ func checkUndeclaredIdentifiers(doc *Document) []protocol.Diagnostic {
 		scope      *Scope
 		childIndex int // Which child scope we're currently using
 	}
-	
+
 	scopeStack := []scopeInfo{{scope: symbolTable.GlobalScope, childIndex: 0}}
 	inFunctionScope := false // Track if we're inside a function (not loops/conditionals)
 
@@ -1444,12 +1444,12 @@ func checkUndeclaredIdentifiers(doc *Document) []protocol.Diagnostic {
 		switch node.Type {
 		case ahoy.NODE_IDENTIFIER:
 			identifierName := node.Value
-			
+
 			// Skip underscore - it's used as a wildcard/default case
 			if identifierName == "_" {
 				return
 			}
-			
+
 			// Check if this identifier is a namespace for C headers
 			isNamespace := false
 			if doc.CHeaders != nil {
@@ -1457,15 +1457,15 @@ func checkUndeclaredIdentifiers(doc *Document) []protocol.Diagnostic {
 					isNamespace = true
 				}
 			}
-			
+
 			// If it's a namespace, skip validation
 			if isNamespace {
 				return
 			}
-			
+
 			// Look up the identifier in the current scope (searches parent scopes too)
 			sym := scope.Lookup(identifierName)
-			
+
 			// Check if we're accessing a global variable from within a FUNCTION (not loops/conditionals)
 			if sym != nil && inFunctionScope {
 				// Check if the symbol is NOT in the current (non-global) scope
@@ -1478,7 +1478,7 @@ func checkUndeclaredIdentifiers(doc *Document) []protocol.Diagnostic {
 						if globalSym.Kind == SymbolKindVariable {
 							// Accessing global variable from function - error!
 							message := "Cannot access global variable '" + identifierName + "' from within function. Pass it as a parameter instead."
-							
+
 							diagnostics = append(diagnostics, protocol.Diagnostic{
 								Range: protocol.Range{
 									Start: protocol.Position{Line: uint32(node.Line - 1), Character: 0},
@@ -1493,7 +1493,7 @@ func checkUndeclaredIdentifiers(doc *Document) []protocol.Diagnostic {
 					}
 				}
 			}
-			
+
 			// If not found in symbol table, check C header enums/defines
 			if sym == nil {
 				// Check C header enums and defines
@@ -1513,7 +1513,7 @@ func checkUndeclaredIdentifiers(doc *Document) []protocol.Diagnostic {
 						}
 					}
 				}
-				
+
 				// Also check namespaced headers
 				if !foundInCHeader {
 					for _, headerInfo := range doc.CHeaders {
@@ -1534,17 +1534,17 @@ func checkUndeclaredIdentifiers(doc *Document) []protocol.Diagnostic {
 						}
 					}
 				}
-				
+
 				if foundInCHeader {
 					// Found in C headers, no error
 					sym = &Symbol{Name: identifierName, Kind: SymbolKindCEnum}
 				}
 			}
-			
+
 			if sym == nil {
 				// Identifier not found
 				identifierType := "variable"
-				
+
 				// Check naming convention
 				isAllCaps := true
 				for _, ch := range identifierName {
@@ -1553,13 +1553,13 @@ func checkUndeclaredIdentifiers(doc *Document) []protocol.Diagnostic {
 						break
 					}
 				}
-				
+
 				if isAllCaps && len(identifierName) > 1 {
 					identifierType = "constant"
 				}
-				
+
 				message := "Use of undeclared " + identifierType + " '" + identifierName + "'"
-				
+
 				lineText := ""
 				if node.Line > 0 && node.Line <= len(doc.Lines) {
 					lineText = doc.Lines[node.Line-1]
@@ -1608,16 +1608,16 @@ func checkUndeclaredIdentifiers(doc *Document) []protocol.Diagnostic {
 				funcScope := scope.Children[currentInfo.childIndex]
 				currentInfo.childIndex++
 				scopeStack = append(scopeStack, scopeInfo{scope: funcScope, childIndex: 0})
-				
+
 				// Mark that we're inside a function
 				oldInFunction := inFunctionScope
 				inFunctionScope = true
-				
+
 				// Check function body
 				if len(node.Children) > 1 {
 					checkNode(node.Children[1], depth+1)
 				}
-				
+
 				// Restore function state
 				inFunctionScope = oldInFunction
 				scopeStack = scopeStack[:len(scopeStack)-1]
@@ -1630,12 +1630,12 @@ func checkUndeclaredIdentifiers(doc *Document) []protocol.Diagnostic {
 				ifScope := scope.Children[currentInfo.childIndex]
 				currentInfo.childIndex++
 				scopeStack = append(scopeStack, scopeInfo{scope: ifScope, childIndex: 0})
-				
+
 				// Check all children in the if scope
 				for _, child := range node.Children {
 					checkNode(child, depth+1)
 				}
-				
+
 				scopeStack = scopeStack[:len(scopeStack)-1]
 			} else {
 				// No more child scopes, check with current scope
@@ -1652,7 +1652,7 @@ func checkUndeclaredIdentifiers(doc *Document) []protocol.Diagnostic {
 				loopScope := scope.Children[currentInfo.childIndex]
 				currentInfo.childIndex++
 				scopeStack = append(scopeStack, scopeInfo{scope: loopScope, childIndex: 0})
-				
+
 				// Determine which children to skip (variable declarations)
 				startIdx := 0
 				switch node.Type {
@@ -1671,12 +1671,12 @@ func checkUndeclaredIdentifiers(doc *Document) []protocol.Diagnostic {
 				case ahoy.NODE_FOR_IN_DICT_LOOP:
 					startIdx = 2 // Skip key and value vars
 				}
-				
+
 				// Check children with loop scope
 				for i := startIdx; i < len(node.Children); i++ {
 					checkNode(node.Children[i], depth+1)
 				}
-				
+
 				scopeStack = scopeStack[:len(scopeStack)-1]
 			} else {
 				// No more child scopes, check with current scope
@@ -1703,7 +1703,7 @@ func checkUndeclaredIdentifiers(doc *Document) []protocol.Diagnostic {
 				}
 			}
 			return
-		
+
 		case ahoy.NODE_BINARY_OP:
 			// Handle named arguments: skip checking the left side (parameter name)
 			if node.Value == "named_arg" {
@@ -1735,7 +1735,7 @@ func findScopeForLine(scope *Scope, line int) *Scope {
 	if scope == nil {
 		return nil
 	}
-	
+
 	// First check direct children
 	for _, child := range scope.Children {
 		if child.StartLine <= line && (child.EndLine == 0 || child.EndLine >= line) {
@@ -1746,12 +1746,12 @@ func findScopeForLine(scope *Scope, line int) *Scope {
 			return child
 		}
 	}
-	
+
 	// If current scope contains the line, return it
 	if scope.StartLine <= line && (scope.EndLine == 0 || scope.EndLine >= line) {
 		return scope
 	}
-	
+
 	return nil
 }
 
@@ -1760,14 +1760,14 @@ func findFunctionScope(scope *Scope, line int) *Scope {
 	if scope == nil {
 		return nil
 	}
-	
+
 	// Check each child scope to see if it contains this line
 	for _, child := range scope.Children {
 		if child.StartLine <= line && (child.EndLine == 0 || child.EndLine >= line) {
 			return child
 		}
 	}
-	
+
 	return nil
 }
 
@@ -1776,7 +1776,7 @@ func inferArgType(node *ahoy.ASTNode) string {
 	if node == nil {
 		return "unknown"
 	}
-	
+
 	switch node.Type {
 	case ahoy.NODE_NUMBER:
 		// Check if it's float or int based on value
@@ -1866,7 +1866,7 @@ func checkFunctionCallArgumentCounts(doc *Document) []protocol.Diagnostic {
 	}
 
 	collectFunctions(doc.AST)
-	
+
 	// Also collect functions from package files
 	if doc.PackageFiles != nil {
 		for _, pkgFile := range doc.PackageFiles {
@@ -1875,16 +1875,16 @@ func checkFunctionCallArgumentCounts(doc *Document) []protocol.Diagnostic {
 			}
 		}
 	}
-	
+
 	// Add C function signatures from imported headers
 	if doc.CHeaderGlobal != nil {
 		for cFuncName, cFunc := range doc.CHeaderGlobal.Functions {
 			snakeName := ahoy.PascalToSnake(cFuncName)
 			sig := &FunctionSignature{
-				Name:          snakeName,
-				ReturnType:    cFunc.ReturnType,
+				Name:           snakeName,
+				ReturnType:     cFunc.ReturnType,
 				RequiredParams: len(cFunc.Parameters),
-				TotalParams:   len(cFunc.Parameters),
+				TotalParams:    len(cFunc.Parameters),
 			}
 			for _, param := range cFunc.Parameters {
 				sig.Parameters = append(sig.Parameters, ParameterInfo{
@@ -1896,16 +1896,16 @@ func checkFunctionCallArgumentCounts(doc *Document) []protocol.Diagnostic {
 			funcSignatures[snakeName] = sig
 		}
 	}
-	
+
 	// Add namespaced C functions
 	for _, headerInfo := range doc.CHeaders {
 		for cFuncName, cFunc := range headerInfo.Functions {
 			snakeName := ahoy.PascalToSnake(cFuncName)
 			sig := &FunctionSignature{
-				Name:          snakeName,
-				ReturnType:    cFunc.ReturnType,
+				Name:           snakeName,
+				ReturnType:     cFunc.ReturnType,
 				RequiredParams: len(cFunc.Parameters),
-				TotalParams:   len(cFunc.Parameters),
+				TotalParams:    len(cFunc.Parameters),
 			}
 			for _, param := range cFunc.Parameters {
 				sig.Parameters = append(sig.Parameters, ParameterInfo{
@@ -1941,7 +1941,7 @@ func checkFunctionCallArgumentCounts(doc *Document) []protocol.Diagnostic {
 					expectedTypes += param.Type
 				}
 				expectedTypes += "]"
-				
+
 				// Build actual types string (approximation based on arg nodes)
 				actualTypes := "["
 				for i, arg := range node.Children {
@@ -2072,7 +2072,7 @@ func checkFunctionCallArgumentTypes(doc *Document) []protocol.Diagnostic {
 	}
 
 	collectFunctions(doc.AST)
-	
+
 	// Also collect functions from package files
 	if doc.PackageFiles != nil {
 		for _, pkgFile := range doc.PackageFiles {
@@ -2160,13 +2160,13 @@ func checkFunctionCallArgumentTypes(doc *Document) []protocol.Diagnostic {
 					for i, arg := range node.Children {
 						actualType := inferExpressionType(arg, doc)
 						actualTypes = append(actualTypes, actualType)
-						
+
 						// Additional validation for object literals passed to functions
 						if arg.Type == ahoy.NODE_OBJECT_LITERAL && i < len(expectedTypes) {
 							expectedType := expectedTypes[i]
 							// Get the actual struct type from the object literal's Value field
 							actualStructType := strings.ToLower(arg.Value)
-							
+
 							// Check if the object literal has the correct properties for struct types
 							if expectedType != "object" && expectedType != "unknown" && expectedType != "" {
 								// Check C structs
@@ -2176,23 +2176,23 @@ func checkFunctionCallArgumentTypes(doc *Document) []protocol.Diagnostic {
 											// Validate object properties against C struct fields
 											objectProps := make(map[string]bool)
 											expectedProps := []string{}
-											
+
 											for _, field := range cStruct.Fields {
 												expectedProps = append(expectedProps, field.Name)
 											}
-											
+
 											for _, prop := range arg.Children {
 												if prop.Type == ahoy.NODE_OBJECT_PROPERTY {
 													objectProps[prop.Value] = true
 												}
 											}
-											
+
 											// Check if all expected properties are present
 											actualProps := []string{}
 											for prop := range objectProps {
 												actualProps = append(actualProps, prop)
 											}
-											
+
 											// Compare properties
 											if len(expectedProps) > 0 && len(actualProps) > 0 {
 												propsMatch := true
@@ -2210,12 +2210,12 @@ func checkFunctionCallArgumentTypes(doc *Document) []protocol.Diagnostic {
 														}
 													}
 												}
-												
+
 												if !propsMatch {
 													expectedPropsStr := strings.Join(expectedProps, ",")
 													actualPropsStr := strings.Join(actualProps, ",")
 													message := "Object properties mismatch: expected " + expectedPropsStr + " got " + actualPropsStr
-													
+
 													lineText := ""
 													if node.Line > 0 && node.Line <= len(doc.Lines) {
 														lineText = doc.Lines[node.Line-1]
@@ -2224,7 +2224,7 @@ func checkFunctionCallArgumentTypes(doc *Document) []protocol.Diagnostic {
 													if endChar == 0 {
 														endChar = uint32(len(funcName) + 10)
 													}
-													
+
 													diagnostic := protocol.Diagnostic{
 														Range: protocol.Range{
 															Start: protocol.Position{
@@ -2264,12 +2264,12 @@ func checkFunctionCallArgumentTypes(doc *Document) []protocol.Diagnostic {
 							expected == "infer" || actual == "infer" {
 							continue
 						}
-						
+
 						// Allow int->float implicit conversion
 						if expected == "float" && actual == "int" {
 							continue
 						}
-						
+
 						// Allow string to match char (C char* can accept string literals)
 						if expected == "char" && actual == "string" {
 							continue
@@ -2282,7 +2282,7 @@ func checkFunctionCallArgumentTypes(doc *Document) []protocol.Diagnostic {
 						} else {
 							compatible = (expected == actual)
 						}
-						
+
 						if !compatible {
 							mismatch = true
 							break
@@ -2476,7 +2476,7 @@ func checkTypeMismatches(doc *Document) []protocol.Diagnostic {
 						}
 					}
 				}
-				
+
 				if typeMismatch {
 					lineText := ""
 					if node.Line > 0 && node.Line <= len(doc.Lines) {
@@ -2535,7 +2535,7 @@ func checkTypeMismatches(doc *Document) []protocol.Diagnostic {
 						typeMismatch = true
 					}
 				}
-				
+
 				if typeMismatch {
 					lineText := ""
 					if node.Line > 0 && node.Line <= len(doc.Lines) {
@@ -2615,7 +2615,7 @@ func inferExpressionType(node *ahoy.ASTNode, doc *Document) string {
 				return sym.Type
 			}
 		}
-		
+
 		// Check if it's a C #define constant
 		if doc != nil && doc.CHeaderGlobal != nil {
 			if define, exists := doc.CHeaderGlobal.Defines[node.Value]; exists {
@@ -2624,7 +2624,7 @@ func inferExpressionType(node *ahoy.ASTNode, doc *Document) string {
 				return extractTypeFromDefine(define.Value)
 			}
 		}
-		
+
 		// Check namespaced C headers
 		if doc != nil {
 			for _, cHeader := range doc.CHeaders {
@@ -2633,13 +2633,37 @@ func inferExpressionType(node *ahoy.ASTNode, doc *Document) string {
 				}
 			}
 		}
-		
+
 		return "unknown"
 
 	case ahoy.NODE_CALL:
 		// Look up function return type and infer from arguments if needed
 		funcName := node.Value
-		
+
+		// First check if it's a C function from imported headers
+		if doc != nil && doc.CHeaderGlobal != nil {
+			// Check global C functions (snake_case names)
+			for cFuncName, cFunc := range doc.CHeaderGlobal.Functions {
+				if ahoy.PascalToSnake(cFuncName) == funcName {
+					// Map C return type to Ahoy type
+					ahoyType := mapCTypeToAhoyType(cFunc.ReturnType)
+					return ahoyType
+				}
+			}
+		}
+
+		// Check namespaced C headers
+		if doc != nil {
+			for _, cHeader := range doc.CHeaders {
+				for cFuncName, cFunc := range cHeader.Functions {
+					if ahoy.PascalToSnake(cFuncName) == funcName {
+						ahoyType := mapCTypeToAhoyType(cFunc.ReturnType)
+						return ahoyType
+					}
+				}
+			}
+		}
+
 		// Build function signatures map if not already done
 		funcSignatures := make(map[string]*FunctionSignature)
 		if doc != nil && doc.AST != nil {
@@ -2674,11 +2698,11 @@ func inferExpressionType(node *ahoy.ASTNode, doc *Document) string {
 			}
 			collectFunctions(doc.AST)
 		}
-		
+
 		// Look up the function
 		if sig, exists := funcSignatures[funcName]; exists {
 			returnType := sig.ReturnType
-			
+
 			// If return type is "infer" or empty (generic), infer from arguments
 			if returnType == "infer" || returnType == "" || returnType == "generic" {
 				// For infer/generic returns, we need to trace through the function body
@@ -2691,7 +2715,7 @@ func inferExpressionType(node *ahoy.ASTNode, doc *Document) string {
 						if i < len(sig.Parameters) {
 							paramName := sig.Parameters[i].Name
 							paramType := sig.Parameters[i].Type
-							
+
 							// If parameter type is empty/generic, infer from argument
 							if paramType == "" || paramType == "generic" {
 								argType := inferExpressionType(arg, doc)
@@ -2699,16 +2723,16 @@ func inferExpressionType(node *ahoy.ASTNode, doc *Document) string {
 							}
 						}
 					}
-					
+
 					// Now we'd need to trace through the function body with inferred types
 					// This is complex - for now return "infer" to indicate it needs inference
 					return "infer"
 				}
 			}
-			
+
 			return returnType
 		}
-		
+
 		return "unknown"
 
 	case ahoy.NODE_BINARY_OP:
@@ -2761,16 +2785,16 @@ func mapCTypeToAhoyType(cType string) string {
 	cType = strings.TrimSpace(cType)
 	cType = strings.TrimPrefix(cType, "const ")
 	cType = strings.TrimSpace(cType)
-	
+
 	// Handle pointers to types (like char* for string)
 	if strings.Contains(cType, "char") && strings.Contains(cType, "*") {
 		return "string"
 	}
-	
+
 	// Remove pointer notation for other types
 	cType = strings.ReplaceAll(cType, "*", "")
 	cType = strings.TrimSpace(cType)
-	
+
 	switch cType {
 	case "int", "short", "long", "unsigned int", "unsigned short", "unsigned long",
 		"int8_t", "int16_t", "int32_t", "int64_t",
@@ -2807,7 +2831,7 @@ func extractTypeFromDefine(defineValue string) string {
 			return strings.ToLower(typeName)
 		}
 	}
-	
+
 	// Look for (Type){ ... } pattern
 	if strings.Contains(defineValue, ")(") || strings.Contains(defineValue, "){") {
 		// Try to extract type from cast pattern like (Color){ ... }
@@ -2823,97 +2847,97 @@ func extractTypeFromDefine(defineValue string) string {
 			}
 		}
 	}
-	
+
 	return "unknown"
 }
 
 // checkDeferFreeReturns validates that variables freed in defer are not returned
 func checkDeferFreeReturns(doc *Document) []protocol.Diagnostic {
-diagnostics := []protocol.Diagnostic{}
+	diagnostics := []protocol.Diagnostic{}
 
-if doc.AST == nil {
-return diagnostics
-}
+	if doc.AST == nil {
+		return diagnostics
+	}
 
-var checkFunction func(node *ahoy.ASTNode)
-checkFunction = func(node *ahoy.ASTNode) {
-if node == nil {
-return
-}
+	var checkFunction func(node *ahoy.ASTNode)
+	checkFunction = func(node *ahoy.ASTNode) {
+		if node == nil {
+			return
+		}
 
-// Only check function bodies
-if node.Type == ahoy.NODE_FUNCTION {
-if len(node.Children) < 2 {
-return
-}
+		// Only check function bodies
+		if node.Type == ahoy.NODE_FUNCTION {
+			if len(node.Children) < 2 {
+				return
+			}
 
-body := node.Children[1]
+			body := node.Children[1]
 
-// Find all defer free statements
-deferredFreed := make(map[string]int) // var name -> line number
-var findDefers func(*ahoy.ASTNode)
-findDefers = func(n *ahoy.ASTNode) {
-if n == nil {
-return
-}
+			// Find all defer free statements
+			deferredFreed := make(map[string]int) // var name -> line number
+			var findDefers func(*ahoy.ASTNode)
+			findDefers = func(n *ahoy.ASTNode) {
+				if n == nil {
+					return
+				}
 
-if n.Type == ahoy.NODE_DEFER_STATEMENT && len(n.Children) > 0 {
-child := n.Children[0]
-if child.Type == ahoy.NODE_CALL && child.Value == "free" && len(child.Children) > 0 {
-if child.Children[0].Type == ahoy.NODE_IDENTIFIER {
-varName := child.Children[0].Value
-deferredFreed[varName] = n.Line
-}
-}
-}
+				if n.Type == ahoy.NODE_DEFER_STATEMENT && len(n.Children) > 0 {
+					child := n.Children[0]
+					if child.Type == ahoy.NODE_CALL && child.Value == "free" && len(child.Children) > 0 {
+						if child.Children[0].Type == ahoy.NODE_IDENTIFIER {
+							varName := child.Children[0].Value
+							deferredFreed[varName] = n.Line
+						}
+					}
+				}
 
-for _, c := range n.Children {
-findDefers(c)
-}
-}
-findDefers(body)
+				for _, c := range n.Children {
+					findDefers(c)
+				}
+			}
+			findDefers(body)
 
-// Find all return statements and check if they return freed variables
-var findReturns func(*ahoy.ASTNode)
-findReturns = func(n *ahoy.ASTNode) {
-if n == nil {
-return
-}
+			// Find all return statements and check if they return freed variables
+			var findReturns func(*ahoy.ASTNode)
+			findReturns = func(n *ahoy.ASTNode) {
+				if n == nil {
+					return
+				}
 
-if n.Type == ahoy.NODE_RETURN_STATEMENT {
-for _, returnValue := range n.Children {
-if returnValue.Type == ahoy.NODE_IDENTIFIER {
-varName := returnValue.Value
-if _, freed := deferredFreed[varName]; freed {
-message := "Cannot return variable '" + varName + "' which is freed in defer statement - this will cause use-after-free"
+				if n.Type == ahoy.NODE_RETURN_STATEMENT {
+					for _, returnValue := range n.Children {
+						if returnValue.Type == ahoy.NODE_IDENTIFIER {
+							varName := returnValue.Value
+							if _, freed := deferredFreed[varName]; freed {
+								message := "Cannot return variable '" + varName + "' which is freed in defer statement - this will cause use-after-free"
 
-diagnostics = append(diagnostics, protocol.Diagnostic{
-Range: protocol.Range{
-Start: protocol.Position{Line: uint32(n.Line - 1), Character: 0},
-End:   protocol.Position{Line: uint32(n.Line - 1), Character: 100},
-},
-Severity: protocol.DiagnosticSeverityError,
-Source:   "ahoy-lsp",
-Message:  message,
-})
-}
-}
-}
-}
+								diagnostics = append(diagnostics, protocol.Diagnostic{
+									Range: protocol.Range{
+										Start: protocol.Position{Line: uint32(n.Line - 1), Character: 0},
+										End:   protocol.Position{Line: uint32(n.Line - 1), Character: 100},
+									},
+									Severity: protocol.DiagnosticSeverityError,
+									Source:   "ahoy-lsp",
+									Message:  message,
+								})
+							}
+						}
+					}
+				}
 
-for _, c := range n.Children {
-findReturns(c)
-}
-}
-findReturns(body)
-}
+				for _, c := range n.Children {
+					findReturns(c)
+				}
+			}
+			findReturns(body)
+		}
 
-// Recursively check other functions
-for _, child := range node.Children {
-checkFunction(child)
-}
-}
+		// Recursively check other functions
+		for _, child := range node.Children {
+			checkFunction(child)
+		}
+	}
 
-checkFunction(doc.AST)
-return diagnostics
+	checkFunction(doc.AST)
+	return diagnostics
 }
