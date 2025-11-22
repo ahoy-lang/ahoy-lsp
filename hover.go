@@ -229,6 +229,17 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 		}
 	}
 	
+	// Check if it's a built-in function
+	if hoverText := getBuiltinFunctionHover(word); hoverText != "" {
+		hover := protocol.Hover{
+			Contents: protocol.MarkupContent{
+				Kind:  protocol.Markdown,
+				Value: hoverText,
+			},
+		}
+		return reply(ctx, hover, nil)
+	}
+	
 	// Check if it's a built-in method (array, dict, or string)
 	if hoverText := getMethodHover(word); hoverText != "" {
 		hover := protocol.Hover{
@@ -469,6 +480,25 @@ func getKeywordHover(keyword string) string {
 	if doc, ok := keywordDocs[keyword]; ok {
 		return doc
 	}
+	return ""
+}
+
+func getBuiltinFunctionHover(funcName string) string {
+	builtinFunctions := map[string]string{
+		"read_json": "**read_json** - Read and parse JSON file\n\nSyntax: `result, err : read_json|\"file.json\"|`\n\nReturns: (AhoyJSON*, error string)\n\nExample:\n```ahoy\nconfig, err : read_json|\"config.json\"|\nif err then\n    print|err|\n    return\n$\nversion : config.version\n```",
+		"write_json": "**write_json** - Write JSON to file\n\nSyntax: `err : write_json|\"file.json\", json_obj|`\n\nReturns: error string or NULL\n\nExample:\n```ahoy\nerr : write_json|\"output.json\", my_json|\n```",
+		"ahoy_json_string": "**ahoy_json_string** - Extract string value from JSON\n\nSyntax: `str : ahoy_json_string|json_node|`\n\nReturns: String value\n\nExample:\n```ahoy\nversion : config.version\nver_str : ahoy_json_string|version|\nprint|ver_str|\n```",
+		"ahoy_json_int": "**ahoy_json_int** - Extract integer value from JSON\n\nSyntax: `num : ahoy_json_int|json_node|`\n\nReturns: Integer value\n\nExample:\n```ahoy\ncount : config.count\ncount_val : ahoy_json_int|count|\n```",
+		"ahoy_json_number": "**ahoy_json_number** - Extract number value from JSON\n\nSyntax: `num : ahoy_json_number|json_node|`\n\nReturns: Double/float value",
+		"ahoy_json_bool": "**ahoy_json_bool** - Extract boolean value from JSON\n\nSyntax: `flag : ahoy_json_bool|json_node|`\n\nReturns: Boolean (0 or 1)",
+		"ahoy_json_get": "**ahoy_json_get** - Get property from JSON object\n\nSyntax: `prop : ahoy_json_get|json_obj, \"key\"|`\n\nNote: Usually used automatically with dot notation: `json.property`",
+		"ahoy_json_get_index": "**ahoy_json_get_index** - Get element from JSON array\n\nSyntax: `elem : ahoy_json_get_index|json_arr, index|`\n\nNote: Usually used automatically with array access: `json.arr[0]`",
+	}
+	
+	if doc, ok := builtinFunctions[funcName]; ok {
+		return fmt.Sprintf("```ahoy\n%s\n```\n\n%s\n\n**Built-in Function**", funcName, doc)
+	}
+	
 	return ""
 }
 

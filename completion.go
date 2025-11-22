@@ -492,6 +492,29 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 			}
 		}
 
+		// Add built-in functions
+		builtinFuncs := map[string]string{
+			"read_json":          "(filename:string) -> (AhoyJSON*, error:string)",
+			"write_json":         "(filename:string, json:AhoyJSON*) -> error:string",
+			"ahoy_json_string":   "(json:AhoyJSON*) -> string",
+			"ahoy_json_int":      "(json:AhoyJSON*) -> int",
+			"ahoy_json_number":   "(json:AhoyJSON*) -> float",
+			"ahoy_json_bool":     "(json:AhoyJSON*) -> bool",
+			"ahoy_json_get":      "(json:AhoyJSON*, key:string) -> AhoyJSON*",
+			"ahoy_json_get_index": "(json:AhoyJSON*, index:int) -> AhoyJSON*",
+			"print":              "(value) -> void",
+			"sprintf":            "(format:string, ...) -> string",
+		}
+		for funcName, signature := range builtinFuncs {
+			if prefix == "" || strings.HasPrefix(funcName, prefix) {
+				items = append(items, protocol.CompletionItem{
+					Label:  funcName,
+					Kind:   protocol.CompletionItemKindFunction,
+					Detail: signature,
+				})
+			}
+		}
+
 		// Add variables in scope (including local variables)
 		visibleSymbols := symbolTable.GetVisibleSymbols(int(params.Position.Line) + 1)
 		debugLog.Printf("Completion: Found %d visible symbols at line %d, prefix='%s'", len(visibleSymbols), int(params.Position.Line)+1, prefix)

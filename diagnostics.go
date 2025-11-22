@@ -1187,6 +1187,14 @@ var builtinFunctions = []string{
 	"float",
 	"char",
 	"string",
+	"read_json",
+	"write_json",
+	"ahoy_json_string",
+	"ahoy_json_number",
+	"ahoy_json_int",
+	"ahoy_json_bool",
+	"ahoy_json_get",
+	"ahoy_json_get_index",
 }
 
 // isBuiltinFunction checks if a function name is a built-in function
