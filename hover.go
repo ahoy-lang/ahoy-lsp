@@ -58,11 +58,11 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 						paramList += " " + param.Name
 					}
 				}
-				
+
 				hoverText := fmt.Sprintf("```c\n%s %s(%s)\n```\n\n", cFunc.ReturnType, cFuncName, paramList)
 				hoverText += fmt.Sprintf("**C Function** from imported header\n\n")
 				hoverText += fmt.Sprintf("Call as: `%s|...|`", word)
-				
+
 				hover := protocol.Hover{
 					Contents: protocol.MarkupContent{
 						Kind:  protocol.Markdown,
@@ -72,7 +72,7 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 				return reply(ctx, hover, nil)
 			}
 		}
-		
+
 		// Check C enum VALUES (not enum names)
 		foundEnumValue := false
 		var enumValueInfo struct {
@@ -87,12 +87,12 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 				break
 			}
 		}
-		
+
 		if foundEnumValue {
 			hoverText := fmt.Sprintf("```c\n%s\n```\n\n", word)
 			hoverText += fmt.Sprintf("**C Enum Value** from %s\n\n", enumValueInfo.enumName)
 			hoverText += fmt.Sprintf("Value: `%d`", enumValueInfo.value)
-			
+
 			hover := protocol.Hover{
 				Contents: protocol.MarkupContent{
 					Kind:  protocol.Markdown,
@@ -101,12 +101,12 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 			}
 			return reply(ctx, hover, nil)
 		}
-		
+
 		// Check C defines
 		if cDefine, ok := doc.CHeaderGlobal.Defines[word]; ok {
 			hoverText := fmt.Sprintf("```c\n#define %s %s\n```\n\n", word, cDefine.Value)
 			hoverText += "**C Define** from imported header"
-			
+
 			hover := protocol.Hover{
 				Contents: protocol.MarkupContent{
 					Kind:  protocol.Markdown,
@@ -115,7 +115,7 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 			}
 			return reply(ctx, hover, nil)
 		}
-		
+
 		// Check C structs (case-insensitive match)
 		for structName, cStruct := range doc.CHeaderGlobal.Structs {
 			if ahoy.ToLowerFirst(structName) == word || structName == word {
@@ -126,7 +126,7 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 				hoverText += fmt.Sprintf("} %s;\n```\n\n", structName)
 				hoverText += fmt.Sprintf("**C Struct** from imported header\n\n")
 				hoverText += fmt.Sprintf("Use as: `%s<field1: val1, field2: val2>`", word)
-				
+
 				hover := protocol.Hover{
 					Contents: protocol.MarkupContent{
 						Kind:  protocol.Markdown,
@@ -137,7 +137,7 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 			}
 		}
 	}
-	
+
 	// Check namespaced C headers
 	for _, headerInfo := range doc.CHeaders {
 		// Check functions
@@ -153,11 +153,11 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 						paramList += " " + param.Name
 					}
 				}
-				
+
 				hoverText := fmt.Sprintf("```c\n%s %s(%s)\n```\n\n", cFunc.ReturnType, cFuncName, paramList)
 				hoverText += "**C Function** from namespaced import\n\n"
 				hoverText += fmt.Sprintf("Call as: `%s|...|`", word)
-				
+
 				hover := protocol.Hover{
 					Contents: protocol.MarkupContent{
 						Kind:  protocol.Markdown,
@@ -167,7 +167,7 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 				return reply(ctx, hover, nil)
 			}
 		}
-		
+
 		// Check enums
 		if cEnum, ok := headerInfo.Enums[word]; ok {
 			hoverText := fmt.Sprintf("```c\n%s\n```\n\n", word)
@@ -183,7 +183,7 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 					first = false
 				}
 			}
-			
+
 			hover := protocol.Hover{
 				Contents: protocol.MarkupContent{
 					Kind:  protocol.Markdown,
@@ -192,12 +192,12 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 			}
 			return reply(ctx, hover, nil)
 		}
-		
+
 		// Check defines
 		if cDefine, ok := headerInfo.Defines[word]; ok {
 			hoverText := fmt.Sprintf("```c\n#define %s %s\n```\n\n", word, cDefine.Value)
 			hoverText += "**C Define** from namespaced import"
-			
+
 			hover := protocol.Hover{
 				Contents: protocol.MarkupContent{
 					Kind:  protocol.Markdown,
@@ -206,7 +206,7 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 			}
 			return reply(ctx, hover, nil)
 		}
-		
+
 		// Check structs
 		for structName, cStruct := range headerInfo.Structs {
 			if ahoy.ToLowerFirst(structName) == word || structName == word {
@@ -217,7 +217,7 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 				hoverText += fmt.Sprintf("} %s;\n```\n\n", structName)
 				hoverText += "**C Struct** from namespaced import\n\n"
 				hoverText += fmt.Sprintf("Use as: `%s<field1: val1, field2: val2>`", word)
-				
+
 				hover := protocol.Hover{
 					Contents: protocol.MarkupContent{
 						Kind:  protocol.Markdown,
@@ -228,7 +228,7 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 			}
 		}
 	}
-	
+
 	// Check if it's a built-in function
 	if hoverText := getBuiltinFunctionHover(word); hoverText != "" {
 		hover := protocol.Hover{
@@ -239,7 +239,7 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 		}
 		return reply(ctx, hover, nil)
 	}
-	
+
 	// Check if it's a built-in method (array, dict, or string)
 	if hoverText := getMethodHover(word); hoverText != "" {
 		hover := protocol.Hover{
@@ -259,7 +259,7 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 	} else {
 		symbolTable = doc.SymbolTable
 	}
-	
+
 	if symbolTable != nil {
 		// Use LookupAtPosition to find symbols in the correct scope (including function-local variables)
 		symbol := symbolTable.LookupAtPosition(word, int(params.Position.Line)+1, int(params.Position.Character))
@@ -327,13 +327,13 @@ func buildHoverText(symbol *Symbol) string {
 			}
 			params = append(params, paramStr)
 		}
-		
+
 		// Build signature: @ name :: |params| returnType:
 		returnType := symbol.Type
 		if returnType == "" {
 			returnType = "void"
 		}
-		
+
 		text = fmt.Sprintf("```ahoy\n@ %s :: |%s| %s:\n```\n\n",
 			symbol.Name,
 			strings.Join(params, ", "),
@@ -454,6 +454,8 @@ func getKeywordHover(keyword string) string {
 		"when":    "**when** - Compile-time conditional\n\nSyntax: `when CONDITION do ... end`",
 		"import":  "**import** - Import external library\n\nSyntax: `import \"library.h\"`",
 		"ahoy":    "**ahoy** - Print statement (shorthand for print)\n\nSyntax: `ahoy \"Hello!\"`",
+		"log":     "**log** - Log message to file with timestamp\n\nSyntax: `log|\"message\", \"file.log\"|`",
+		"panic":   "**panic** - Print error and exit program\n\nSyntax: `panic|\"error message\"|`",
 		"is":      "**is** - Equality operator (==)\n\nSyntax: `if x is 5 then ... end`",
 		"not":     "**not** - Logical NOT operator (!)\n\nSyntax: `if not condition then ... end`",
 		"and":     "**and** - Logical AND operator (&&)\n\nSyntax: `if cond1 and cond2 then ... end`",
@@ -485,20 +487,22 @@ func getKeywordHover(keyword string) string {
 
 func getBuiltinFunctionHover(funcName string) string {
 	builtinFunctions := map[string]string{
-		"read_json": "**read_json** - Read and parse JSON file\n\nSyntax: `result, err : read_json|\"file.json\"|`\n\nReturns: (AhoyJSON*, error string)\n\nExample:\n```ahoy\nconfig, err : read_json|\"config.json\"|\nif err then\n    print|err|\n    return\n$\nversion : config.version\n```",
-		"write_json": "**write_json** - Write JSON to file\n\nSyntax: `err : write_json|\"file.json\", json_obj|`\n\nReturns: error string or NULL\n\nExample:\n```ahoy\nerr : write_json|\"output.json\", my_json|\n```",
-		"ahoy_json_string": "**ahoy_json_string** - Extract string value from JSON\n\nSyntax: `str : ahoy_json_string|json_node|`\n\nReturns: String value\n\nExample:\n```ahoy\nversion : config.version\nver_str : ahoy_json_string|version|\nprint|ver_str|\n```",
-		"ahoy_json_int": "**ahoy_json_int** - Extract integer value from JSON\n\nSyntax: `num : ahoy_json_int|json_node|`\n\nReturns: Integer value\n\nExample:\n```ahoy\ncount : config.count\ncount_val : ahoy_json_int|count|\n```",
-		"ahoy_json_number": "**ahoy_json_number** - Extract number value from JSON\n\nSyntax: `num : ahoy_json_number|json_node|`\n\nReturns: Double/float value",
-		"ahoy_json_bool": "**ahoy_json_bool** - Extract boolean value from JSON\n\nSyntax: `flag : ahoy_json_bool|json_node|`\n\nReturns: Boolean (0 or 1)",
-		"ahoy_json_get": "**ahoy_json_get** - Get property from JSON object\n\nSyntax: `prop : ahoy_json_get|json_obj, \"key\"|`\n\nNote: Usually used automatically with dot notation: `json.property`",
+		"read_json":           "**read_json** - Read and parse JSON file\n\nSyntax: `result, err : read_json|\"file.json\"|`\n\nReturns: (AhoyJSON*, error string)\n\nExample:\n```ahoy\nconfig, err : read_json|\"config.json\"|\nif err then\n    print|err|\n    return\n$\nversion : config.version\n```",
+		"write_json":          "**write_json** - Write JSON to file\n\nSyntax: `err : write_json|\"file.json\", json_obj|`\n\nReturns: error string or NULL\n\nExample:\n```ahoy\nerr : write_json|\"output.json\", my_json|\n```",
+		"ahoy_json_string":    "**ahoy_json_string** - Extract string value from JSON\n\nSyntax: `str : ahoy_json_string|json_node|`\n\nReturns: String value\n\nExample:\n```ahoy\nversion : config.version\nver_str : ahoy_json_string|version|\nprint|ver_str|\n```",
+		"ahoy_json_int":       "**ahoy_json_int** - Extract integer value from JSON\n\nSyntax: `num : ahoy_json_int|json_node|`\n\nReturns: Integer value\n\nExample:\n```ahoy\ncount : config.count\ncount_val : ahoy_json_int|count|\n```",
+		"ahoy_json_number":    "**ahoy_json_number** - Extract number value from JSON\n\nSyntax: `num : ahoy_json_number|json_node|`\n\nReturns: Double/float value",
+		"ahoy_json_bool":      "**ahoy_json_bool** - Extract boolean value from JSON\n\nSyntax: `flag : ahoy_json_bool|json_node|`\n\nReturns: Boolean (0 or 1)",
+		"ahoy_json_get":       "**ahoy_json_get** - Get property from JSON object\n\nSyntax: `prop : ahoy_json_get|json_obj, \"key\"|`\n\nNote: Usually used automatically with dot notation: `json.property`",
 		"ahoy_json_get_index": "**ahoy_json_get_index** - Get element from JSON array\n\nSyntax: `elem : ahoy_json_get_index|json_arr, index|`\n\nNote: Usually used automatically with array access: `json.arr[0]`",
+		"log":                 "**log** - Log message to file with timestamp\n\nSyntax: `log|message, file_path|`\n\nExample:\n```ahoy\nlog|\"Application started\", \"app.log\"|\nlog|\"Error occurred\", \"errors.log\"|\n```\n\nThe log function:\n- Creates the file if it doesn't exist\n- Appends to existing files\n- Automatically adds timestamp to each entry\n- Useful for debugging and monitoring",
+		"panic":               "**panic** - Print error message and exit program\n\nSyntax: `panic|error_message|`\n\nExample:\n```ahoy\nif file_not_found then\n    panic|\"Critical error: config.json not found\"|\n$\n```\n\nThe panic function:\n- Prints the error message to stderr with \"PANIC:\" prefix\n- Immediately exits the program with code 1\n- Useful for unrecoverable errors",
 	}
-	
+
 	if doc, ok := builtinFunctions[funcName]; ok {
 		return fmt.Sprintf("```ahoy\n%s\n```\n\n%s\n\n**Built-in Function**", funcName, doc)
 	}
-	
+
 	return ""
 }
 
@@ -518,7 +522,7 @@ func getMethodHover(method string) string {
 		"map":     "**map** - Transform each element\n\nSyntax: `arr.map|lambda|`\n\nExample: `[1,2,3].map|x => x * 2|`\n\nReturns: New array",
 		"filter":  "**filter** - Keep elements matching condition\n\nSyntax: `arr.filter|lambda|`\n\nExample: `[1,2,3,4].filter|x => x > 2|`\n\nReturns: New array",
 	}
-	
+
 	// Dictionary methods
 	dictMethods := map[string]string{
 		"size":        "**size** - Get number of key-value pairs\n\nSyntax: `dict.size||`\n\nReturns: Integer",
@@ -532,7 +536,7 @@ func getMethodHover(method string) string {
 		"sort":        "**sort** - Sort dict by keys\n\nSyntax: `dict.sort||`\n\nReturns: Sorted dictionary",
 		"stable_sort": "**stable_sort** - Stable sort by keys\n\nSyntax: `dict.stable_sort||`\n\nReturns: Sorted dictionary",
 	}
-	
+
 	// String methods
 	stringMethods := map[string]string{
 		"length":      "**length** - Get string length\n\nSyntax: `str.length||`\n\nReturns: Integer",
@@ -553,7 +557,7 @@ func getMethodHover(method string) string {
 		"strip":       "**strip** - Remove leading/trailing whitespace\n\nSyntax: `str.strip||`\n\nReturns: Trimmed string",
 		"get_file":    "**get_file** - Extract filename from path\n\nSyntax: `path.get_file||`\n\nReturns: Filename string",
 	}
-	
+
 	// Check all method types
 	if doc, ok := arrayMethods[method]; ok {
 		return fmt.Sprintf("```ahoy\n%s\n```\n\n%s\n\n**Array Method**", method, doc)
@@ -564,6 +568,6 @@ func getMethodHover(method string) string {
 	if doc, ok := stringMethods[method]; ok {
 		return fmt.Sprintf("```ahoy\n%s\n```\n\n%s\n\n**String Method**", method, doc)
 	}
-	
+
 	return ""
 }

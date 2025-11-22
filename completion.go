@@ -51,7 +51,7 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 		start++
 		prefix = currentLine[start:params.Position.Character]
 	}
-	
+
 	// FIRST: Check if we're typing after a C header namespace prefix (e.g., "rl.")
 	// This must be checked BEFORE general dot completion
 	if params.Position.Character > 0 {
@@ -66,12 +66,12 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 			identStart++
 			if identStart <= identEnd {
 				possibleNamespace := currentLine[identStart : identEnd+1]
-				
+
 				// Check if this is a C header namespace
 				if headerInfo, ok := doc.CHeaders[possibleNamespace]; ok {
 					// Yes! Provide C header namespace completions
 					items := []protocol.CompletionItem{}
-					
+
 					// Add namespace functions (snake_case)
 					for funcName, cFunc := range headerInfo.Functions {
 						snakeName := ahoy.PascalToSnake(funcName)
@@ -87,7 +87,7 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 									paramList += param.Type
 								}
 							}
-							
+
 							items = append(items, protocol.CompletionItem{
 								Label:  snakeName,
 								Kind:   protocol.CompletionItemKindFunction,
@@ -95,7 +95,7 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 							})
 						}
 					}
-					
+
 					// Add namespace enums
 					for enumName := range headerInfo.Enums {
 						if prefix == "" || strings.HasPrefix(enumName, prefix) {
@@ -106,7 +106,7 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 							})
 						}
 					}
-					
+
 					// Add namespace defines
 					for defineName := range headerInfo.Defines {
 						if prefix == "" || strings.HasPrefix(defineName, prefix) {
@@ -117,7 +117,7 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 							})
 						}
 					}
-					
+
 					// Add namespace structs (lowercase first letter)
 					for structName := range headerInfo.Structs {
 						lowerName := ahoy.ToLowerFirst(structName)
@@ -129,7 +129,7 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 							})
 						}
 					}
-					
+
 					// Return early with namespace completions
 					result := protocol.CompletionList{
 						IsIncomplete: false,
@@ -137,7 +137,7 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 					}
 					return reply(ctx, result, nil)
 				}
-				
+
 				// Check if this is a C enum type (e.g., ConfigFlags.)
 				// Check in global header
 				if doc.CHeaderGlobal != nil {
@@ -160,7 +160,7 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 						return reply(ctx, result, nil)
 					}
 				}
-				
+
 				// Check in namespaced headers
 				for _, headerInfo := range doc.CHeaders {
 					if cEnum, ok := headerInfo.Enums[possibleNamespace]; ok {
@@ -184,12 +184,12 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 			}
 		}
 	}
-	
+
 	// Check if we're after a dot (.) for method completion
 	isDotCompletion := false
 	beforePrefix := ""
 	beforePrefixType := "" // Track if we detected a literal type
-	
+
 	if params.Position.Character > 0 {
 		// Look back from the prefix to find if there's a dot
 		checkPos := int(params.Position.Character) - len(prefix) - 1
@@ -197,7 +197,7 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 			// We're after a dot, find what's before it
 			identEnd := checkPos - 1
 			identStart := identEnd
-			
+
 			// Check if it's a string literal (quoted)
 			if identEnd >= 0 && (currentLine[identEnd] == '"' || currentLine[identEnd] == '\'') {
 				quoteChar := currentLine[identEnd]
@@ -260,7 +260,7 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 			}
 		}
 	}
-	
+
 	// If we're after a dot, provide completions based on the type
 	if isDotCompletion {
 		// First check if we detected a literal type directly
@@ -277,7 +277,7 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 			items = addDictMethods(items, prefix)
 			return reply(ctx, protocol.CompletionList{IsIncomplete: false, Items: items}, nil)
 		}
-		
+
 		// Get symbol table to look up the type
 		// Use PackageSymbols if available (for multi-file packages), otherwise use regular SymbolTable
 		var symbolTable *SymbolTable
@@ -289,7 +289,7 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 			symbolTable = BuildSymbolTable(doc.AST)
 			defer symbolTable.Clear()
 		}
-		
+
 		if symbolTable != nil {
 			// Look up the variable/identifier before the dot
 			if sym := symbolTable.Lookup(beforePrefix); sym != nil {
@@ -298,7 +298,7 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 					// Return empty completion list for constants
 					return reply(ctx, protocol.CompletionList{IsIncomplete: false, Items: []protocol.CompletionItem{}}, nil)
 				}
-				
+
 				// Check type-specific completions first
 				// Check if it's a string type for string methods
 				if sym.Type == "string" {
@@ -317,7 +317,7 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 					items = addDictMethods(items, prefix)
 					return reply(ctx, protocol.CompletionList{IsIncomplete: false, Items: items}, nil)
 				}
-				
+
 				// Check if it's an enum type
 				if sym.Kind == SymbolKindEnum {
 					// Add enum member completions
@@ -330,7 +330,7 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 							} else {
 								detailText = fmt.Sprintf("%s %s", memberName, detailText)
 							}
-							
+
 							items = append(items, protocol.CompletionItem{
 								Label:  memberName,
 								Kind:   protocol.CompletionItemKindEnumMember,
@@ -340,7 +340,7 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 					}
 					return reply(ctx, protocol.CompletionList{IsIncomplete: false, Items: items}, nil)
 				}
-				
+
 				// Check if it's an object literal type
 				if sym.Type == "object" && sym.Fields != nil && len(sym.Fields) > 0 {
 					// Add object literal property completions
@@ -353,7 +353,7 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 							})
 						}
 					}
-					
+
 					// Return early with object literal property completions
 					result := protocol.CompletionList{
 						IsIncomplete: false,
@@ -361,12 +361,12 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 					}
 					return reply(ctx, result, nil)
 				}
-				
+
 				// Check if it's a struct type (only after checking built-in types and object literals)
 				if sym.Kind == SymbolKindVariable || sym.Kind == SymbolKindConstant {
 					// Get struct fields based on the variable's type
 					fields := symbolTable.GetStructFields(sym.Type)
-					
+
 					if fields != nil && len(fields) > 0 {
 						// Add struct field completions
 						for fieldName, field := range fields {
@@ -378,7 +378,7 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 								})
 							}
 						}
-						
+
 						// Return early with struct field completions
 						result := protocol.CompletionList{
 							IsIncomplete: false,
@@ -477,7 +477,7 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 						}
 						params = append(params, paramStr)
 					}
-					
+
 					detail := sym.Name + "(" + strings.Join(params, ", ") + ")"
 					if sym.Type != "" && sym.Type != "void" {
 						detail += " -> " + sym.Type
@@ -494,16 +494,18 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 
 		// Add built-in functions
 		builtinFuncs := map[string]string{
-			"read_json":          "(filename:string) -> (AhoyJSON*, error:string)",
-			"write_json":         "(filename:string, json:AhoyJSON*) -> error:string",
-			"ahoy_json_string":   "(json:AhoyJSON*) -> string",
-			"ahoy_json_int":      "(json:AhoyJSON*) -> int",
-			"ahoy_json_number":   "(json:AhoyJSON*) -> float",
-			"ahoy_json_bool":     "(json:AhoyJSON*) -> bool",
-			"ahoy_json_get":      "(json:AhoyJSON*, key:string) -> AhoyJSON*",
+			"read_json":           "(filename:string) -> (AhoyJSON*, error:string)",
+			"write_json":          "(filename:string, json:AhoyJSON*) -> error:string",
+			"ahoy_json_string":    "(json:AhoyJSON*) -> string",
+			"ahoy_json_int":       "(json:AhoyJSON*) -> int",
+			"ahoy_json_number":    "(json:AhoyJSON*) -> float",
+			"ahoy_json_bool":      "(json:AhoyJSON*) -> bool",
+			"ahoy_json_get":       "(json:AhoyJSON*, key:string) -> AhoyJSON*",
 			"ahoy_json_get_index": "(json:AhoyJSON*, index:int) -> AhoyJSON*",
-			"print":              "(value) -> void",
-			"sprintf":            "(format:string, ...) -> string",
+			"print":               "(value) -> void",
+			"log":                 "(message, file_path:string) -> void",
+			"panic":               "(error) -> void",
+			"sprintf":             "(format:string, ...) -> string",
 		}
 		for funcName, signature := range builtinFuncs {
 			if prefix == "" || strings.HasPrefix(funcName, prefix) {
@@ -602,7 +604,7 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 						paramList += param.Type
 					}
 				}
-				
+
 				items = append(items, protocol.CompletionItem{
 					Label:  snakeName,
 					Kind:   protocol.CompletionItemKindFunction,
@@ -610,7 +612,7 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 				})
 			}
 		}
-		
+
 		// Add global C enum VALUES (not enum names)
 		debugLog.Printf("Completion: Checking C enum values, have %d enums, prefix='%s'", len(doc.CHeaderGlobal.Enums), prefix)
 		for enumName, enum := range doc.CHeaderGlobal.Enums {
@@ -626,7 +628,7 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 				}
 			}
 		}
-		
+
 		// Add global C defines
 		for defineName := range doc.CHeaderGlobal.Defines {
 			if prefix == "" || strings.HasPrefix(defineName, prefix) {
@@ -637,7 +639,7 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 				})
 			}
 		}
-		
+
 		// Add global C structs (lowercase first letter)
 		for structName := range doc.CHeaderGlobal.Structs {
 			lowerName := ahoy.ToLowerFirst(structName)
@@ -650,7 +652,7 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 			}
 		}
 	}
-	
+
 	result := protocol.CompletionList{
 		IsIncomplete: false,
 		Items:        items,
@@ -689,7 +691,7 @@ func addStringMethods(items []protocol.CompletionItem, prefix string) []protocol
 		{"strip", "Trim whitespace", "Removes leading and trailing whitespace", "||"},
 		{"get_file", "Get filename from path", "Extracts the filename from a file path", "||"},
 	}
-	
+
 	for _, method := range stringMethods {
 		if prefix == "" || strings.HasPrefix(method.label, prefix) {
 			items = append(items, protocol.CompletionItem{
@@ -729,7 +731,7 @@ func addArrayMethods(items []protocol.CompletionItem, prefix string) []protocol.
 		{"slice", "Get subarray", "Returns a portion of the array", "|start, end|"},
 		{"fill", "Fill array", "Creates array filled with value. Example: [].fill|-1, 4|", "|value, count|"},
 	}
-	
+
 	for _, method := range arrayMethods {
 		if prefix == "" || strings.HasPrefix(method.label, prefix) {
 			items = append(items, protocol.CompletionItem{
@@ -763,7 +765,7 @@ func addDictMethods(items []protocol.CompletionItem, prefix string) []protocol.C
 		{"stable_sort", "Stable sort by keys", "Returns a new dictionary with stable sort by keys", "||"},
 		{"merge", "Merge dictionaries", "Merges another dictionary into this one", "|other_dict|"},
 	}
-	
+
 	for _, method := range dictMethods {
 		if prefix == "" || strings.HasPrefix(method.label, prefix) {
 			items = append(items, protocol.CompletionItem{
