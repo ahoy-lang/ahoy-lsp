@@ -440,7 +440,7 @@ func getKeywordHover(keyword string) string {
 		"elseif":  "**elseif** - Additional condition in if statement\n\nSyntax: `if cond1 then ... elseif cond2 then ... end`",
 		"anif":    "**anif** - Alternative to elseif\n\nSyntax: `if cond1 then ... anif cond2 then ... end`",
 		"then":    "**then** - Begins the body of a conditional or loop",
-		"do":      "**do** - Begins the body of a loop or function",
+		"do":      "**do** - Begins the body of a loop",
 		"end":     "**end** - Closes a block (if, loop, func, etc.)",
 		"loop":    "**loop** - Loop statement\n\nSyntax:\n- `loop condition do ... end`\n- `loop i:start to end do ... end`\n- `loop element in array do ... end`",
 		"in":      "**in** - Used in for-in loops\n\nSyntax: `loop element in array do ... end`",

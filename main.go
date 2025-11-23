@@ -85,7 +85,8 @@ func runValidate(filename string) {
 
 	// Import ahoy package
 	tokens := ahoy.Tokenize(string(content))
-	ast, parseErrors := ahoy.ParseLint(tokens)
+	// Use ParseLintWithPath to support relative imports
+	ast, parseErrors := ahoy.ParseLintWithPath(tokens, filename)
 
 	// Check syntax errors
 	if len(parseErrors) > 0 {
