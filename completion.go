@@ -118,12 +118,11 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 						}
 					}
 
-					// Add namespace structs (lowercase first letter)
+					// Add namespace structs (keep exact C name)
 					for structName := range headerInfo.Structs {
-						lowerName := ahoy.ToLowerFirst(structName)
-						if prefix == "" || strings.HasPrefix(lowerName, prefix) || strings.HasPrefix(structName, prefix) {
+						if prefix == "" || strings.HasPrefix(structName, prefix) {
 							items = append(items, protocol.CompletionItem{
-								Label:  lowerName,
+								Label:  structName,
 								Kind:   protocol.CompletionItemKindStruct,
 								Detail: fmt.Sprintf("C struct %s", structName),
 							})
@@ -640,12 +639,11 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 			}
 		}
 
-		// Add global C structs (lowercase first letter)
+		// Add global C structs (keep exact C name)
 		for structName := range doc.CHeaderGlobal.Structs {
-			lowerName := ahoy.ToLowerFirst(structName)
-			if prefix == "" || strings.HasPrefix(lowerName, prefix) || strings.HasPrefix(structName, prefix) {
+			if prefix == "" || strings.HasPrefix(structName, prefix) {
 				items = append(items, protocol.CompletionItem{
-					Label:  lowerName,
+					Label:  structName,
 					Kind:   protocol.CompletionItemKindStruct,
 					Detail: fmt.Sprintf("C struct %s", structName),
 				})
