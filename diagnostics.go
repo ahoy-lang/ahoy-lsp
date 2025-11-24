@@ -79,6 +79,14 @@ func (s *Server) publishDiagnostics(ctx context.Context, doc *Document) {
 			invalidFreeDiags := checkInvalidFreeOperations(doc)
 			diagnostics = append(diagnostics, invalidFreeDiags...)
 
+			// Check for mismatched return value counts
+			returnCountDiags := checkReturnValueCounts(doc)
+			diagnostics = append(diagnostics, returnCountDiags...)
+
+			// Check for duplicate heap-allocated variable returns
+			duplicateReturnDiags := checkDuplicateReturns(doc)
+			diagnostics = append(diagnostics, duplicateReturnDiags...)
+
 			diagnostics = append(diagnostics, argTypeDiags...)
 
 			// Check variable/constant type mismatches
