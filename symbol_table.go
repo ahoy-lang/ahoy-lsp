@@ -141,7 +141,19 @@ func (s *Scope) TypesCompatible(expected, actual string) bool {
 	}
 	
 	// Direct comparison of resolved types
-	return expectedResolved == actualResolved || expected == actual || expectedResolved == actual
+	if expectedResolved == actualResolved || expected == actual || expectedResolved == actual {
+		return true
+	}
+	
+	// Case-insensitive comparison for C types (e.g., Vector2 vs vector2)
+	// This allows flexibility in type naming while still catching real mismatches
+	if strings.EqualFold(expectedResolved, actualResolved) || 
+	   strings.EqualFold(expected, actual) || 
+	   strings.EqualFold(expectedResolved, actual) {
+		return true
+	}
+	
+	return false
 }
 
 // SymbolTable manages all symbols in a document

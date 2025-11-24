@@ -71,6 +71,10 @@ func (s *Server) publishDiagnostics(ctx context.Context, doc *Document) {
 			deferReturnDiags := checkDeferFreeReturns(doc)
 			diagnostics = append(diagnostics, deferReturnDiags...)
 
+			// Check for redundant manual defer frees (auto-freed variables)
+			redundantFreeDiags := checkRedundantDeferFrees(doc)
+			diagnostics = append(diagnostics, redundantFreeDiags...)
+
 			diagnostics = append(diagnostics, argTypeDiags...)
 
 			// Check variable/constant type mismatches
@@ -2940,4 +2944,155 @@ func checkDeferFreeReturns(doc *Document) []protocol.Diagnostic {
 
 	checkFunction(doc.AST)
 	return diagnostics
+}
+
+func checkRedundantDeferFrees(doc *Document) []protocol.Diagnostic {
+	diagnostics := []protocol.Diagnostic{}
+
+	if doc.AST == nil {
+		return diagnostics
+	}
+
+	var checkFunction func(node *ahoy.ASTNode)
+	checkFunction = func(node *ahoy.ASTNode) {
+		if node == nil {
+			return
+		}
+
+		// Only check function bodies
+		if node.Type == ahoy.NODE_FUNCTION {
+			if len(node.Children) < 2 {
+				return
+			}
+
+			body := node.Children[1]
+			params := node.Children[0]
+
+			// Track heap-allocated variables (similar to codegen logic)
+			heapAllocatedVars := make(map[string]bool)
+			escapingVars := make(map[string]bool)
+			deferredFreed := make(map[string]int) // var name -> line number
+
+			// Get parameter names (these escape by default as they're passed in)
+			paramNames := make(map[string]bool)
+			for _, param := range params.Children {
+				paramNames[param.Value] = true
+			}
+
+			// Find all variable declarations and track heap allocations
+			var findVars func(*ahoy.ASTNode)
+			findVars = func(n *ahoy.ASTNode) {
+				if n == nil {
+					return
+				}
+
+				if n.Type == ahoy.NODE_ASSIGNMENT && len(n.Children) > 0 {
+					varName := n.Value
+					valueNode := n.Children[0]
+
+					// Check if this creates heap-allocated data
+					if valueNode.Type == ahoy.NODE_ARRAY_LITERAL {
+						// Array literal allocates heap memory
+						// But not if it's just aliasing another variable
+						heapAllocatedVars[varName] = true
+					} else if valueNode.Type == ahoy.NODE_DICT_LITERAL {
+						// Dict literal allocates heap memory
+						heapAllocatedVars[varName] = true
+					} else if valueNode.Type == ahoy.NODE_OBJECT_LITERAL && valueNode.Value == "" {
+						// Anonymous object literal (dict)
+						heapAllocatedVars[varName] = true
+					}
+				}
+
+				// Track return statements (mark returned vars as escaping)
+				if n.Type == ahoy.NODE_RETURN_STATEMENT {
+					for _, child := range n.Children {
+						markEscaping(child, &escapingVars)
+					}
+				}
+
+				// Track assignments to other variables (mark RHS as escaping)
+				if n.Type == ahoy.NODE_ASSIGNMENT && len(n.Children) > 0 {
+					valueNode := n.Children[0]
+					if valueNode.Type == ahoy.NODE_IDENTIFIER {
+						// Variable-to-variable assignment makes RHS escape
+						escapingVars[valueNode.Value] = true
+					}
+				}
+
+				for _, c := range n.Children {
+					findVars(c)
+				}
+			}
+			findVars(body)
+
+			// Find all defer free statements
+			var findDefers func(*ahoy.ASTNode)
+			findDefers = func(n *ahoy.ASTNode) {
+				if n == nil {
+					return
+				}
+
+				if n.Type == ahoy.NODE_DEFER_STATEMENT && len(n.Children) > 0 {
+					child := n.Children[0]
+					if child.Type == ahoy.NODE_CALL && child.Value == "free" && len(child.Children) > 0 {
+						if child.Children[0].Type == ahoy.NODE_IDENTIFIER {
+							varName := child.Children[0].Value
+							deferredFreed[varName] = n.Line
+						}
+					}
+				}
+
+				for _, c := range n.Children {
+					findDefers(c)
+				}
+			}
+			findDefers(body)
+
+			// Check for redundant defer frees
+			for varName, line := range deferredFreed {
+				// Skip if it's a parameter (can't determine if it's heap-allocated)
+				if paramNames[varName] {
+					continue
+				}
+
+				// Check if this variable would be automatically freed
+				if heapAllocatedVars[varName] && !escapingVars[varName] {
+					// This variable would be automatically freed - warn about redundancy
+					diag := protocol.Diagnostic{
+						Range: protocol.Range{
+							Start: protocol.Position{Line: uint32(line - 1), Character: 0},
+							End:   protocol.Position{Line: uint32(line - 1), Character: 100},
+						},
+						Severity: protocol.DiagnosticSeverityInformation,
+						Source:   "ahoy",
+						Message:  "Redundant defer free: variable '" + varName + "' will be automatically freed at end of function",
+					}
+					diagnostics = append(diagnostics, diag)
+				}
+			}
+		}
+
+		// Recursively check other functions
+		for _, child := range node.Children {
+			checkFunction(child)
+		}
+	}
+
+	checkFunction(doc.AST)
+	return diagnostics
+}
+
+func markEscaping(node *ahoy.ASTNode, escapingVars *map[string]bool) {
+	if node == nil {
+		return
+	}
+
+	if node.Type == ahoy.NODE_IDENTIFIER {
+		(*escapingVars)[node.Value] = true
+	}
+
+	for _, child := range node.Children {
+		markEscaping(child, escapingVars)
+	}
 }
