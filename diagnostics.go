@@ -87,6 +87,10 @@ func (s *Server) publishDiagnostics(ctx context.Context, doc *Document) {
 			duplicateReturnDiags := checkDuplicateReturns(doc)
 			diagnostics = append(diagnostics, duplicateReturnDiags...)
 
+			// Check for type typos
+			typeTypoDiags := checkTypeTypos(doc)
+			diagnostics = append(diagnostics, typeTypoDiags...)
+
 			diagnostics = append(diagnostics, argTypeDiags...)
 
 			// Check variable/constant type mismatches
@@ -3005,7 +3009,6 @@ func checkRedundantDeferFrees(doc *Document) []protocol.Diagnostic {
 					// Check if this creates heap-allocated data
 					if valueNode.Type == ahoy.NODE_ARRAY_LITERAL {
 						// Array literal allocates heap memory
-						// But not if it's just aliasing another variable
 						heapAllocatedVars[varName] = true
 					} else if valueNode.Type == ahoy.NODE_DICT_LITERAL {
 						// Dict literal allocates heap memory
@@ -3013,6 +3016,139 @@ func checkRedundantDeferFrees(doc *Document) []protocol.Diagnostic {
 					} else if valueNode.Type == ahoy.NODE_OBJECT_LITERAL && valueNode.Value == "" {
 						// Anonymous object literal (dict)
 						heapAllocatedVars[varName] = true
+					} else if valueNode.Type == ahoy.NODE_CALL {
+						// Function call that returns heap-allocated type
+						// Check the function's return type
+						funcName := valueNode.Value
+						symbolTable := getSymbolTable(doc)
+						if symbolTable != nil {
+							funcSym := symbolTable.GlobalScope.Lookup(funcName)
+							if funcSym != nil && funcSym.Kind == SymbolKindFunction {
+								returnType := funcSym.Type
+								
+								// If return type is "infer", try to infer it
+								if returnType == "infer" || returnType == "" || returnType == "generic" {
+									// Find the function node and infer from its body
+									var funcNode *ahoy.ASTNode
+									var findFunc func(*ahoy.ASTNode)
+									findFunc = func(fn *ahoy.ASTNode) {
+										if fn == nil {
+											return
+										}
+										if fn.Type == ahoy.NODE_FUNCTION && fn.Value == funcName {
+											funcNode = fn
+											return
+										}
+										for _, child := range fn.Children {
+											if funcNode == nil {
+												findFunc(child)
+											}
+										}
+									}
+									if doc.AST != nil {
+										findFunc(doc.AST)
+									}
+									
+									// Infer return types from function body
+									if funcNode != nil {
+										inferredTypes := inferFunctionReturnTypes(funcNode, []string{}, doc)
+										if len(inferredTypes) > 0 {
+											returnType = inferredTypes[0] // Take first return type for single assignment
+										}
+									}
+								}
+								
+								// Check if return type is heap-allocated
+								if strings.HasPrefix(returnType, "array") ||
+									strings.HasPrefix(returnType, "dict") ||
+									strings.Contains(returnType, "<") { // Typed collections
+									heapAllocatedVars[varName] = true
+								}
+							}
+						}
+					}
+				}
+
+				// Handle tuple assignments from function calls
+				// e.g., new_dict,new_dict2: test_dictionary||;
+				// Children[0] = leftSide (block with identifiers)
+				// Children[1] = rightSide (block with function call or expressions)
+				if n.Type == ahoy.NODE_TUPLE_ASSIGNMENT && len(n.Children) >= 2 {
+					leftSide := n.Children[0]
+					rightSide := n.Children[1]
+					
+					// Check if right side is a function call
+					if len(rightSide.Children) > 0 && rightSide.Children[0].Type == ahoy.NODE_CALL {
+						callNode := rightSide.Children[0]
+						funcName := callNode.Value
+						
+						// Look up function return types
+						symbolTable := getSymbolTable(doc)
+						if symbolTable != nil {
+							funcSym := symbolTable.GlobalScope.Lookup(funcName)
+							if funcSym != nil && funcSym.Kind == SymbolKindFunction {
+								returnTypeStr := funcSym.Type
+								
+								// If return type is "infer", try to infer it
+								if returnTypeStr == "infer" || returnTypeStr == "" || returnTypeStr == "generic" {
+									// Find the function node and infer from its body
+									var funcNode *ahoy.ASTNode
+									var findFunc func(*ahoy.ASTNode)
+									findFunc = func(fn *ahoy.ASTNode) {
+										if fn == nil {
+											return
+										}
+										if fn.Type == ahoy.NODE_FUNCTION && fn.Value == funcName {
+											funcNode = fn
+											return
+										}
+										for _, child := range fn.Children {
+											if funcNode == nil {
+												findFunc(child)
+											}
+										}
+									}
+									if doc.AST != nil {
+										findFunc(doc.AST)
+									}
+									
+									// Infer return types from function body
+									if funcNode != nil {
+										// Build argument types from the call
+										argTypes := make([]string, 0)
+										for _, arg := range callNode.Children {
+											argType := inferExpressionType(arg, doc)
+											argTypes = append(argTypes, argType)
+										}
+										
+										inferredTypes := inferFunctionReturnTypes(funcNode, argTypes, doc)
+										if len(inferredTypes) > 0 {
+											returnTypeStr = strings.Join(inferredTypes, ",")
+										}
+									}
+								}
+								
+								// Check if any return type is heap-allocated
+								if returnTypeStr != "" && returnTypeStr != "void" {
+									returnTypes := strings.Split(returnTypeStr, ",")
+									
+									// Mark each variable with its corresponding return type
+									for i, leftChild := range leftSide.Children {
+										if leftChild.Type == ahoy.NODE_IDENTIFIER && i < len(returnTypes) {
+											varName := leftChild.Value
+											returnType := strings.TrimSpace(returnTypes[i])
+											
+											// Check if this is a heap-allocated type
+											if strings.HasPrefix(returnType, "array") ||
+												strings.HasPrefix(returnType, "dict") ||
+												strings.Contains(returnType, "<") { // Typed collections
+												heapAllocatedVars[varName] = true
+											}
+										}
+									}
+								}
+							}
+						}
 					}
 				}
 

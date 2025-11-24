@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"strings"
 
 	"ahoy"
 
@@ -52,42 +51,19 @@ func checkDuplicateReturns(doc *Document) []protocol.Diagnostic {
 						}
 					}
 
-					// Check for duplicates
+					// Check for duplicates - error on ANY duplicate variable return
 					for varName, count := range returnedVars {
 						if count > 1 {
-							// Check if this is a heap-allocated type (primitive duplicates are OK)
-							varType := ""
-
-							// Try to find the variable type from symbol table
-							symbolTable := getSymbolTable(doc)
-							if symbolTable != nil && symbolTable.GlobalScope != nil {
-								if sym := symbolTable.GlobalScope.Lookup(varName); sym != nil {
-									varType = sym.Type
-								}
+							diag := protocol.Diagnostic{
+								Range: protocol.Range{
+									Start: protocol.Position{Line: uint32(n.Line - 1), Character: 0},
+									End:   protocol.Position{Line: uint32(n.Line - 1), Character: 100},
+								},
+								Severity: protocol.DiagnosticSeverityError,
+								Source:   "ahoy",
+								Message:  fmt.Sprintf("Cannot return the same variable '%s' multiple times", varName),
 							}
-
-							// Check if it's a heap-allocated type
-							isHeapType := false
-							if strings.HasPrefix(varType, "array") ||
-								strings.HasPrefix(varType, "dict") ||
-								strings.HasPrefix(varType, "HashMap") ||
-								strings.HasPrefix(varType, "AhoyArray") {
-								isHeapType = true
-							}
-
-							// Only warn for heap-allocated types (primitives are fine)
-							if isHeapType {
-								diag := protocol.Diagnostic{
-									Range: protocol.Range{
-										Start: protocol.Position{Line: uint32(n.Line - 1), Character: 0},
-										End:   protocol.Position{Line: uint32(n.Line - 1), Character: 100},
-									},
-									Severity: protocol.DiagnosticSeverityError,
-									Source:   "ahoy",
-									Message:  fmt.Sprintf("Cannot return heap-allocated variable '%s' multiple times: this will cause double-free", varName),
-								}
-								diagnostics = append(diagnostics, diag)
-							}
+							diagnostics = append(diagnostics, diag)
 						}
 					}
 				}

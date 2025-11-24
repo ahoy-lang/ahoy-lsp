@@ -9,7 +9,10 @@ echo "Building Ahoy Language Server..."
     # killall zed-editor
 # fi
 
-killall ahoy-lsp
+if pgrep "ahoy-lsp" > /dev/null; then
+	killall ahoy-lsp
+	echo "killed any running ahoy-lsp servers"
+fi
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
