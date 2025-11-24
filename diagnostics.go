@@ -75,6 +75,10 @@ func (s *Server) publishDiagnostics(ctx context.Context, doc *Document) {
 			redundantFreeDiags := checkRedundantDeferFrees(doc)
 			diagnostics = append(diagnostics, redundantFreeDiags...)
 
+			// Check for invalid free operations (parameters, stack variables)
+			invalidFreeDiags := checkInvalidFreeOperations(doc)
+			diagnostics = append(diagnostics, invalidFreeDiags...)
+
 			diagnostics = append(diagnostics, argTypeDiags...)
 
 			// Check variable/constant type mismatches
@@ -3095,4 +3099,167 @@ func markEscaping(node *ahoy.ASTNode, escapingVars *map[string]bool) {
 	for _, child := range node.Children {
 		markEscaping(child, escapingVars)
 	}
+}
+
+func checkInvalidFreeOperations(doc *Document) []protocol.Diagnostic {
+	diagnostics := []protocol.Diagnostic{}
+
+	if doc.AST == nil {
+		return diagnostics
+	}
+
+	var checkFunction func(node *ahoy.ASTNode)
+	checkFunction = func(node *ahoy.ASTNode) {
+		if node == nil {
+			return
+		}
+
+		// Only check function bodies
+		if node.Type == ahoy.NODE_FUNCTION {
+			if len(node.Children) < 2 {
+				return
+			}
+
+			body := node.Children[1]
+			params := node.Children[0]
+
+			// Get parameter names
+			paramNames := make(map[string]bool)
+			for _, param := range params.Children {
+				paramNames[param.Value] = true
+			}
+
+			// Track variable types (heap vs stack allocated)
+			varTypes := make(map[string]string)
+			
+			// Find all variable declarations
+			var findVars func(*ahoy.ASTNode)
+			findVars = func(n *ahoy.ASTNode) {
+				if n == nil {
+					return
+				}
+
+				if n.Type == ahoy.NODE_ASSIGNMENT && len(n.Children) > 0 {
+					varName := n.Value
+					valueNode := n.Children[0]
+
+					// Determine if this is heap or stack allocated
+					if valueNode.Type == ahoy.NODE_ARRAY_LITERAL {
+						varTypes[varName] = "heap"
+					} else if valueNode.Type == ahoy.NODE_DICT_LITERAL {
+						varTypes[varName] = "heap"
+					} else if valueNode.Type == ahoy.NODE_OBJECT_LITERAL && valueNode.Value == "" {
+						varTypes[varName] = "heap"
+					} else if valueNode.Type == ahoy.NODE_NUMBER {
+						varTypes[varName] = "stack"
+					} else if valueNode.Type == ahoy.NODE_STRING {
+						varTypes[varName] = "stack"
+					} else if valueNode.Type == ahoy.NODE_BOOLEAN {
+						varTypes[varName] = "stack"
+					} else if valueNode.Type == ahoy.NODE_CHAR {
+						varTypes[varName] = "stack"
+					}
+				}
+
+				for _, c := range n.Children {
+					findVars(c)
+				}
+			}
+			findVars(body)
+
+			// Find all free operations (both defer free and direct free)
+			var findFrees func(*ahoy.ASTNode)
+			findFrees = func(n *ahoy.ASTNode) {
+				if n == nil {
+					return
+				}
+
+				// Check for defer free
+				if n.Type == ahoy.NODE_DEFER_STATEMENT && len(n.Children) > 0 {
+					child := n.Children[0]
+					if child.Type == ahoy.NODE_CALL && child.Value == "free" && len(child.Children) > 0 {
+						if child.Children[0].Type == ahoy.NODE_IDENTIFIER {
+							varName := child.Children[0].Value
+
+							// Check if trying to free a parameter
+							if paramNames[varName] {
+								diag := protocol.Diagnostic{
+									Range: protocol.Range{
+										Start: protocol.Position{Line: uint32(n.Line - 1), Character: 0},
+										End:   protocol.Position{Line: uint32(n.Line - 1), Character: 100},
+									},
+									Severity: protocol.DiagnosticSeverityError,
+									Source:   "ahoy",
+									Message:  "Cannot free function parameter '" + varName + "': parameters are owned by the caller",
+								}
+								diagnostics = append(diagnostics, diag)
+							}
+
+							// Check if trying to free a stack-allocated variable
+							if varTypes[varName] == "stack" {
+								diag := protocol.Diagnostic{
+									Range: protocol.Range{
+										Start: protocol.Position{Line: uint32(n.Line - 1), Character: 0},
+										End:   protocol.Position{Line: uint32(n.Line - 1), Character: 100},
+									},
+									Severity: protocol.DiagnosticSeverityError,
+									Source:   "ahoy",
+									Message:  "Cannot free stack-allocated variable '" + varName + "': it will be automatically freed by the stack",
+								}
+								diagnostics = append(diagnostics, diag)
+							}
+						}
+					}
+				}
+
+				// Check for direct free (not deferred)
+				if n.Type == ahoy.NODE_CALL && n.Value == "free" && len(n.Children) > 0 {
+					if n.Children[0].Type == ahoy.NODE_IDENTIFIER {
+						varName := n.Children[0].Value
+
+						// Check if trying to free a parameter
+						if paramNames[varName] {
+							diag := protocol.Diagnostic{
+								Range: protocol.Range{
+									Start: protocol.Position{Line: uint32(n.Line - 1), Character: 0},
+									End:   protocol.Position{Line: uint32(n.Line - 1), Character: 100},
+								},
+								Severity: protocol.DiagnosticSeverityError,
+								Source:   "ahoy",
+								Message:  "Cannot free function parameter '" + varName + "': parameters are owned by the caller",
+							}
+							diagnostics = append(diagnostics, diag)
+						}
+
+						// Check if trying to free a stack-allocated variable
+						if varTypes[varName] == "stack" {
+							diag := protocol.Diagnostic{
+								Range: protocol.Range{
+									Start: protocol.Position{Line: uint32(n.Line - 1), Character: 0},
+									End:   protocol.Position{Line: uint32(n.Line - 1), Character: 100},
+								},
+								Severity: protocol.DiagnosticSeverityError,
+								Source:   "ahoy",
+								Message:  "Cannot free stack-allocated variable '" + varName + "': it will be automatically freed by the stack",
+							}
+							diagnostics = append(diagnostics, diag)
+						}
+					}
+				}
+
+				for _, c := range n.Children {
+					findFrees(c)
+				}
+			}
+			findFrees(body)
+		}
+
+		// Recursively check other functions
+		for _, child := range node.Children {
+			checkFunction(child)
+		}
+	}
+
+	checkFunction(doc.AST)
+	return diagnostics
 }
