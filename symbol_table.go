@@ -1059,7 +1059,21 @@ func (st *SymbolTable) inferType(node *ahoy.ASTNode) string {
 }
 
 func (st *SymbolTable) GetStructFields(typeName string) map[string]*StructField {
-	// Look up the struct type
+	// First, check if this is a C struct from imported headers
+	if st.Doc != nil && st.Doc.CHeaderGlobal != nil {
+		if cStruct, exists := st.Doc.CHeaderGlobal.Structs[typeName]; exists {
+			// Convert C struct fields to StructField map
+			allFields := make(map[string]*StructField)
+			for _, field := range cStruct.Fields {
+				allFields[field.Name] = &StructField{
+					Type: field.Type,
+				}
+			}
+			return allFields
+		}
+	}
+	
+	// Look up the struct type in Ahoy symbol table
 	sym := st.Lookup(typeName)
 	if sym == nil || sym.Kind != SymbolKindStruct {
 		return nil

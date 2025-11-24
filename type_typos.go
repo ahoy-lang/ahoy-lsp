@@ -31,9 +31,9 @@ func checkTypeTypos(doc *Document) []protocol.Diagnostic {
 		validTypes[t] = true
 	}
 
-	// Collect struct types
-	var collectStructs func(*ahoy.ASTNode)
-	collectStructs = func(node *ahoy.ASTNode) {
+	// Collect struct types, enums, unions, and aliases
+	var collectTypes func(*ahoy.ASTNode)
+	collectTypes = func(node *ahoy.ASTNode) {
 		if node == nil {
 			return
 		}
@@ -41,12 +41,21 @@ func checkTypeTypos(doc *Document) []protocol.Diagnostic {
 			validTypes[node.Value] = true
 			// Also add capitalized version
 			validTypes[capitalizeFirst(node.Value)] = true
+		} else if node.Type == ahoy.NODE_ALIAS_DECLARATION {
+			// Add type aliases
+			validTypes[node.Value] = true
+		} else if node.Type == ahoy.NODE_ENUM_DECLARATION {
+			// Add enum types
+			validTypes[node.Value] = true
+		} else if node.Type == ahoy.NODE_UNION_DECLARATION {
+			// Add union types
+			validTypes[node.Value] = true
 		}
 		for _, child := range node.Children {
-			collectStructs(child)
+			collectTypes(child)
 		}
 	}
-	collectStructs(doc.AST)
+	collectTypes(doc.AST)
 
 	// Collect C types from imports
 	if doc.CHeaderGlobal != nil {
