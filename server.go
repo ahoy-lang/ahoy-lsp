@@ -234,9 +234,15 @@ func (s *Server) handleDidOpen(ctx context.Context, reply jsonrpc2.Replier, req 
 		doc.InferredParams = inferParameterTypes(doc.AST, doc)
 		debugLog.Printf("Parameter types inferred for %d functions", len(doc.InferredParams))
 
+		// Infer return types for functions with 'infer' keyword SECOND (before symbol table)
+		debugLog.Printf("Resolving infer return types...")
+		inferredReturnTypes := resolveAllInferReturnTypes(doc.AST, doc)
+		debugLog.Printf("Return types resolved for %d functions", len(inferredReturnTypes))
+
 		debugLog.Printf("Building symbol table...")
 		doc.SymbolTable = BuildSymbolTable(doc.AST, doc.InferredParams)
 		doc.SymbolTable.Doc = doc // Set document reference
+		doc.SymbolTable.InferredReturns = inferredReturnTypes // Store resolved return types
 		debugLog.Printf("Symbol table built")
 
 		// Extract C header imports
