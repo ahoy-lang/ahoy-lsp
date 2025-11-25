@@ -104,6 +104,10 @@ func (s *Server) publishDiagnostics(ctx context.Context, doc *Document) {
 			// Check object literal property assignment
 			objectPropDiags := checkObjectPropertyAssignment(doc)
 			diagnostics = append(diagnostics, objectPropDiags...)
+			
+			// Check for wrong access syntax (array vs dict vs object)
+			accessSyntaxDiags := checkAccessSyntax(doc)
+			diagnostics = append(diagnostics, accessSyntaxDiags...)
 		}
 	}
 
@@ -2483,6 +2487,9 @@ func checkTypeMismatches(doc *Document) []protocol.Diagnostic {
 						if actualType != "dict" && actualType != "unknown" {
 							typeMismatch = true
 						}
+					} else if expectedType == "object" && (actualType == "dict" || actualType == "object") {
+						// object and dict are compatible - {} creates anonymous objects (implemented as dicts)
+						typeMismatch = false
 					} else {
 						// Use symbol table to check type compatibility (handles aliases and unions)
 						symbolTable := getSymbolTable(doc)

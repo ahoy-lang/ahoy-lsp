@@ -1,0 +1,28 @@
+program test
+
+struct person:
+	name: string
+	age: int
+	type dwarf:
+		height: int
+	type giant:
+		height: int
+$
+
+@ main ||:
+	? Test 1: Misspelled struct type
+	person1: peeson{name: "Alice", age: 30}
+	
+	? Test 2: Misspelled nested struct type
+	person2: dwaf{name: "Bob", age: 25, height: 120}
+	
+	? Test 3: Misspelled property
+	person3: person{nae: "Charlie", ag: 35}
+	
+	? Test 4: Correct nested type
+	person4: person:dwarf{name: "Dave", age: 40, height: 130}
+	
+	? Test 5: Wrong access syntax
+	object_numbers: object = {one:"one", two:"two"}
+	first: object_numbers["one"]
+$

@@ -110,6 +110,9 @@ func runValidate(filename string) {
 		AST:     ast,
 	}
 	doc.SymbolTable = BuildSymbolTable(ast)
+	
+	// Parse C headers from imports
+	doc.CHeaders, doc.CHeaderGlobal = extractCHeaderInfo(ast)
 
 	// Run all diagnostic checks (same as publishDiagnostics)
 	allDiagnostics := []protocol.Diagnostic{}
@@ -165,6 +168,14 @@ func runValidate(filename string) {
 	// Check object literal property assignment
 	objectPropDiags := checkObjectPropertyAssignment(doc)
 	allDiagnostics = append(allDiagnostics, objectPropDiags...)
+	
+	// Check type typos
+	typeTypoDiags := checkTypeTypos(doc)
+	allDiagnostics = append(allDiagnostics, typeTypoDiags...)
+	
+	// Check access syntax
+	accessSyntaxDiags := checkAccessSyntax(doc)
+	allDiagnostics = append(allDiagnostics, accessSyntaxDiags...)
 	
 	// Filter for errors only
 	errorCount := 0

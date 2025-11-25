@@ -651,6 +651,21 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 			}
 		}
 	}
+	
+	// Add user-defined structs (case-insensitive matching)
+	if doc.SymbolTable != nil && doc.SymbolTable.GlobalScope != nil {
+		for name, sym := range doc.SymbolTable.GlobalScope.Symbols {
+			if sym.Kind == SymbolKindStruct {
+				if prefix == "" || strings.HasPrefix(strings.ToLower(name), strings.ToLower(prefix)) {
+					items = append(items, protocol.CompletionItem{
+						Label:  name,
+						Kind:   protocol.CompletionItemKindStruct,
+						Detail: fmt.Sprintf("struct %s", name),
+					})
+				}
+			}
+		}
+	}
 
 	result := protocol.CompletionList{
 		IsIncomplete: false,

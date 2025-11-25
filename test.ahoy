@@ -91,18 +91,18 @@ first: numbers{0} ? linter error "invalid array access syntax, use array[] inste
 first: numbers<0> ? linter error "invalid array access syntax, use array[] instead of object<>"
 
 ? dict access
-dict_numbers: {1:"one", 2:"two", 3:"three", 4:"four", 5:"five"} ? dict literal
+dict_numbers: <1:"one", 2:"two", 3:"three", 4:"four", 5:"five"> ? dict literal
 first: dict_numbers["1"] ? linter error "invalid dict access syntax, use dict{} instead of array[]"
 first: dict_numbers{"1"} ? valid syntax no compiler error
-first: dict_numbers<"1"> ? linter error "invalid dict access syntax, use dict{} instead of object<>"
+first: dict_numbers<"1"> ? valid
 
+object_numbers :object= {one:"one", two:"two", three:"three", four:"four", five:"five"} ? fyi this is an object literal not an array literal
 ? object access
 first: object_numbers["one"] ? linter error "invalid dict access syntax, use dict{} instead of array[]"
 first: object_numbers{"one"} ? linter	error "invalid object access syntax, use object<> instead of array[]"
-first: object_numbers<"one"> ? valid syntax no compiler error
-first: object_numbers<"one"> ? valid syntax no compiler error
+first: object_numbers<"one"> ? invalid syntax no compiler error
+first: object_numbers{"one"} ? valid syntax no compiler error
 
-object_numbers : <one:"one", two:"two", three:"three", four:"four", five:"five"> ? fyi this is an object literal not an array literal
 
 object_numbers2: {1:"one", 2:"two", 3:"three", 4:"four", 5:"five"} ? should give linter error	 "object keys must be strings"
 first: object_numbers.one ? valid syntax should not give compiler error fives use of undecalered variable
@@ -133,7 +133,7 @@ struct person:
 $
 
 
-person2: dwarf{name: "Alice", age: 30, height: 12} ? would be inferred as person.dwarf type
+person2: person{name: "Alice", age: 30, height: 12} ? would be inferred as person.dwarf type
 print|person2|
 print|f"{person.name}"|
 
