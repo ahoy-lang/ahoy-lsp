@@ -15,7 +15,8 @@ import (
 func (s *Server) handlePrepareRename(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
 	var params protocol.PrepareRenameParams
 	if err := json.Unmarshal(req.Params(), &params); err != nil {
-		return reply(ctx, nil, err)
+		debugLog.Printf("Failed to unmarshal params in rename_references.go: %v", err)
+		return reply(ctx, nil, nil)
 	}
 
 	doc := s.getDocument(params.TextDocument.URI)
@@ -63,7 +64,8 @@ func (s *Server) handlePrepareRename(ctx context.Context, reply jsonrpc2.Replier
 func (s *Server) handleRename(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
 	var params protocol.RenameParams
 	if err := json.Unmarshal(req.Params(), &params); err != nil {
-		return reply(ctx, nil, err)
+		debugLog.Printf("Failed to unmarshal params in rename_references.go: %v", err)
+		return reply(ctx, nil, nil)
 	}
 
 	doc := s.getDocument(params.TextDocument.URI)
@@ -145,7 +147,8 @@ func (s *Server) handleRename(ctx context.Context, reply jsonrpc2.Replier, req j
 func (s *Server) handleReferences(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
 	var params protocol.ReferenceParams
 	if err := json.Unmarshal(req.Params(), &params); err != nil {
-		return reply(ctx, nil, err)
+		debugLog.Printf("Failed to unmarshal params in rename_references.go: %v", err)
+		return reply(ctx, nil, nil)
 	}
 
 	doc := s.getDocument(params.TextDocument.URI)
@@ -367,7 +370,8 @@ func isIdentifierCharRename(r rune) bool {
 func (s *Server) handleTypeDefinition(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
 	var params protocol.TypeDefinitionParams
 	if err := json.Unmarshal(req.Params(), &params); err != nil {
-		return reply(ctx, nil, err)
+		debugLog.Printf("Failed to unmarshal params in rename_references.go: %v", err)
+		return reply(ctx, nil, nil)
 	}
 
 	doc := s.getDocument(params.TextDocument.URI)
@@ -415,7 +419,8 @@ func (s *Server) handleDeclaration(ctx context.Context, reply jsonrpc2.Replier, 
 func (s *Server) handleFormatting(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
 	var params protocol.DocumentFormattingParams
 	if err := json.Unmarshal(req.Params(), &params); err != nil {
-		return reply(ctx, nil, err)
+		debugLog.Printf("Failed to unmarshal params in rename_references.go: %v", err)
+		return reply(ctx, nil, nil)
 	}
 
 	doc := s.getDocument(params.TextDocument.URI)

@@ -11,7 +11,8 @@ import (
 func (s *Server) handleDocumentSymbol(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
 	var params protocol.DocumentSymbolParams
 	if err := json.Unmarshal(req.Params(), &params); err != nil {
-		return reply(ctx, nil, err)
+		debugLog.Printf("Failed to unmarshal params in symbols.go: %v", err)
+		return reply(ctx, nil, nil)
 	}
 
 	doc := s.getDocument(params.TextDocument.URI)

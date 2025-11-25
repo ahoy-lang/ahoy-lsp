@@ -15,7 +15,8 @@ import (
 func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
 	var params protocol.CompletionParams
 	if err := json.Unmarshal(req.Params(), &params); err != nil {
-		return reply(ctx, nil, err)
+		debugLog.Printf("Failed to unmarshal params in completion.go: %v", err)
+		return reply(ctx, nil, nil)
 	}
 
 	doc := s.getDocument(params.TextDocument.URI)

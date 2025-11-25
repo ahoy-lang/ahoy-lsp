@@ -57,10 +57,10 @@ func (s *Server) Handle(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc
 	// Wrap all handlers with panic recovery to prevent server crashes
 	defer func() {
 		if r := recover(); r != nil {
-			// Log the panic and return an error response
+			// Log the panic but return successful empty response to prevent server shutdown
 			debugLog.Printf("PANIC in handler %s: %v", req.Method(), r)
-			err := fmt.Errorf("handler panic: %v", r)
-			reply(ctx, nil, err)
+			// Return empty result with nil error to keep server alive
+			reply(ctx, nil, nil)
 		}
 	}()
 
@@ -113,7 +113,8 @@ func (s *Server) Handle(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc
 func (s *Server) handleInitialize(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
 	var params protocol.InitializeParams
 	if err := json.Unmarshal(req.Params(), &params); err != nil {
-		return reply(ctx, nil, err)
+		debugLog.Printf("Failed to unmarshal params in server.go: %v", err)
+		return reply(ctx, nil, nil)
 	}
 
 	result := protocol.InitializeResult{
@@ -154,7 +155,8 @@ func (s *Server) handleInitialize(ctx context.Context, reply jsonrpc2.Replier, r
 func (s *Server) handleDidOpen(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
 	var params protocol.DidOpenTextDocumentParams
 	if err := json.Unmarshal(req.Params(), &params); err != nil {
-		return reply(ctx, nil, err)
+		debugLog.Printf("Failed to unmarshal params in server.go: %v", err)
+		return reply(ctx, nil, nil)
 	}
 
 	debugLog.Printf("DidOpen: %s (size: %d bytes)", params.TextDocument.URI, len(params.TextDocument.Text))
@@ -291,7 +293,8 @@ func (s *Server) handleDidOpen(ctx context.Context, reply jsonrpc2.Replier, req 
 func (s *Server) handleDidChange(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
 	var params protocol.DidChangeTextDocumentParams
 	if err := json.Unmarshal(req.Params(), &params); err != nil {
-		return reply(ctx, nil, err)
+		debugLog.Printf("Failed to unmarshal params in server.go: %v", err)
+		return reply(ctx, nil, nil)
 	}
 
 	debugLog.Printf("DidChange: %s", params.TextDocument.URI)
@@ -417,7 +420,8 @@ func (s *Server) handleDidChange(ctx context.Context, reply jsonrpc2.Replier, re
 func (s *Server) handleDidClose(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
 	var params protocol.DidCloseTextDocumentParams
 	if err := json.Unmarshal(req.Params(), &params); err != nil {
-		return reply(ctx, nil, err)
+		debugLog.Printf("Failed to unmarshal params in server.go: %v", err)
+		return reply(ctx, nil, nil)
 	}
 
 	s.mu.Lock()

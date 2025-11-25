@@ -15,7 +15,8 @@ import (
 func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
 	var params protocol.HoverParams
 	if err := json.Unmarshal(req.Params(), &params); err != nil {
-		return reply(ctx, nil, err)
+		debugLog.Printf("Failed to unmarshal hover params: %v", err)
+		return reply(ctx, nil, nil)
 	}
 
 	debugLog.Printf("Hover request at line %d, char %d", params.Position.Line, params.Position.Character)

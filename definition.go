@@ -14,7 +14,8 @@ import (
 func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
 	var params protocol.DefinitionParams
 	if err := json.Unmarshal(req.Params(), &params); err != nil {
-		return reply(ctx, nil, err)
+		debugLog.Printf("Failed to unmarshal params in definition.go: %v", err)
+		return reply(ctx, nil, nil)
 	}
 
 	doc := s.getDocument(params.TextDocument.URI)
