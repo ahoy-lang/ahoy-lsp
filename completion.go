@@ -653,8 +653,16 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 	}
 	
 	// Add user-defined structs (case-insensitive matching)
-	if doc.SymbolTable != nil && doc.SymbolTable.GlobalScope != nil {
-		for name, sym := range doc.SymbolTable.GlobalScope.Symbols {
+	// Use PackageSymbols if available (includes all files in package), otherwise use SymbolTable
+	var structSymbolTable *SymbolTable
+	if doc.PackageSymbols != nil {
+		structSymbolTable = doc.PackageSymbols
+	} else {
+		structSymbolTable = doc.SymbolTable
+	}
+	
+	if structSymbolTable != nil && structSymbolTable.GlobalScope != nil {
+		for name, sym := range structSymbolTable.GlobalScope.Symbols {
 			if sym.Kind == SymbolKindStruct {
 				if prefix == "" || strings.HasPrefix(strings.ToLower(name), strings.ToLower(prefix)) {
 					items = append(items, protocol.CompletionItem{

@@ -218,18 +218,62 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 	if symbol != nil {
 		// Find which file contains this symbol (check package files)
 		targetURI := params.TextDocument.URI
+		bestSymbol := symbol
 		
 		// If we found the symbol in package symbols, check which file it's actually from
 		if doc.PackageSymbols != nil && doc.PackageFiles != nil {
-			// First check if it's in a package file
+			// Collect all matching symbols from all files
+			allSymbols := []struct {
+				sym *Symbol
+				uri protocol.URI
+			}{}
+			
+			// Add current file symbol
+			if doc.SymbolTable != nil {
+				if currentSym := doc.SymbolTable.LookupAtPosition(word, int(params.Position.Line)+1, int(params.Position.Character)); currentSym != nil {
+					allSymbols = append(allSymbols, struct {
+						sym *Symbol
+						uri protocol.URI
+					}{currentSym, params.TextDocument.URI})
+				}
+			}
+			
+			// Add package file symbols
 			for pkgURI, pkgFile := range doc.PackageFiles {
 				if pkgFile.Symbols != nil {
 					if pkgSym := pkgFile.Symbols.Lookup(word); pkgSym != nil {
-						// Found in package file
-						targetURI = pkgURI
-						symbol = pkgSym
-						break
+						allSymbols = append(allSymbols, struct {
+							sym *Symbol
+							uri protocol.URI
+						}{pkgSym, pkgURI})
 					}
+				}
+			}
+			
+			// Find the closest symbol before or at the cursor position
+			cursorLine := int(params.Position.Line) + 1
+			for _, candidate := range allSymbols {
+				// Prefer symbols from current file if cursor is in same file
+				if candidate.uri == params.TextDocument.URI {
+					// For loop variables and local vars, find the closest declaration before cursor
+					if candidate.sym.Kind == SymbolKindVariable || candidate.sym.Kind == SymbolKindParameter {
+						// Only consider if it's before the cursor or on same line
+						if candidate.sym.Line <= cursorLine {
+							// If we don't have a best symbol yet, or this one is closer
+							if bestSymbol == nil || candidate.sym.Line > bestSymbol.Line {
+								bestSymbol = candidate.sym
+								targetURI = candidate.uri
+							}
+						}
+					} else {
+						// For functions, structs, etc, just use this one
+						bestSymbol = candidate.sym
+						targetURI = candidate.uri
+					}
+				} else if targetURI == params.TextDocument.URI {
+					// Only use package file symbol if we haven't found one in current file
+					bestSymbol = candidate.sym
+					targetURI = candidate.uri
 				}
 			}
 		}
@@ -239,17 +283,17 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 			URI: targetURI,
 			Range: protocol.Range{
 				Start: protocol.Position{
-					Line:      uint32(symbol.Line - 1),
-					Character: uint32(symbol.Column),
+					Line:      uint32(bestSymbol.Line - 1),
+					Character: uint32(bestSymbol.Column),
 				},
 				End: protocol.Position{
-					Line:      uint32(symbol.Line - 1),
-					Character: uint32(symbol.Column + len(symbol.Name)),
+					Line:      uint32(bestSymbol.Line - 1),
+					Character: uint32(bestSymbol.Column + len(bestSymbol.Name)),
 				},
 			},
 		}
 
-		debugLog.Printf("Go to definition: %s -> %s:%d", word, targetURI, symbol.Line)
+		debugLog.Printf("Go to definition: %s -> %s:%d", word, targetURI, bestSymbol.Line)
 		return reply(ctx, location, nil)
 	}
 
