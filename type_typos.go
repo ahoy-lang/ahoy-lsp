@@ -71,6 +71,15 @@ func checkTypeTypos(doc *Document) []protocol.Diagnostic {
 	}
 	collectTypes(doc.AST, "")
 
+	// Collect types from package files (same program name)
+	if doc.PackageFiles != nil {
+		for _, pkgFile := range doc.PackageFiles {
+			if pkgFile.AST != nil {
+				collectTypes(pkgFile.AST, "")
+			}
+		}
+	}
+
 	// Collect C types from imports
 	if doc.CHeaderGlobal != nil {
 		for typeName := range doc.CHeaderGlobal.Structs {
