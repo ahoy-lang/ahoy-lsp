@@ -1487,6 +1487,30 @@ func checkUndeclaredIdentifiers(doc *Document) []protocol.Diagnostic {
 				return
 			}
 
+			// Check if this is a dot-prefixed enum member (e.g., .UP, .DOWN)
+			if len(identifierName) > 0 && identifierName[0] == '.' {
+				// Extract the member name without the dot
+				memberName := identifierName[1:]
+				
+				// Search all enum symbols to find this member
+				foundEnumMember := false
+				for _, symbol := range symbolTable.GlobalScope.Symbols {
+					if symbol.Kind == SymbolKindEnum {
+						// Check if this enum has the member
+						if _, exists := symbol.Fields[memberName]; exists {
+							foundEnumMember = true
+							break
+						}
+					}
+				}
+				
+				// If found as enum member, skip validation (it's valid)
+				if foundEnumMember {
+					return
+				}
+				// If not found, fall through to error reporting
+			}
+
 			// Look up the identifier in the current scope (searches parent scopes too)
 			sym := scope.Lookup(identifierName)
 
