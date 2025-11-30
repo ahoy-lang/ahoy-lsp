@@ -108,6 +108,10 @@ func (s *Server) publishDiagnostics(ctx context.Context, doc *Document) {
 			// Check for wrong access syntax (array vs dict vs object)
 			accessSyntaxDiags := checkAccessSyntax(doc)
 			diagnostics = append(diagnostics, accessSyntaxDiags...)
+			
+			// Check for invalid binary operations (string + number, etc.)
+			binaryOpDiags := checkBinaryOperationTypes(doc)
+			diagnostics = append(diagnostics, binaryOpDiags...)
 		}
 	}
 
@@ -1590,23 +1594,47 @@ func checkUndeclaredIdentifiers(doc *Document) []protocol.Diagnostic {
 			}
 
 			if sym == nil {
-				// Identifier not found
-				identifierType := "variable"
+				// Identifier not found - try to find a similar name using Levenshtein distance
 
-				// Check naming convention
-				isAllCaps := true
-				for _, ch := range identifierName {
-					if ch >= 'a' && ch <= 'z' {
-						isAllCaps = false
-						break
+				// Collect all available identifiers for typo detection
+				availableIdentifiers := []string{}
+				for _, s := range symbolTable.GlobalScope.Symbols {
+					if s.Kind == SymbolKindVariable || s.Kind == SymbolKindConstant || s.Kind == SymbolKindParameter {
+						availableIdentifiers = append(availableIdentifiers, s.Name)
+					}
+				}
+				// Also check child scopes (local variables)
+				for _, childScope := range scope.Children {
+					for _, s := range childScope.Symbols {
+						if s.Kind == SymbolKindVariable || s.Kind == SymbolKindConstant || s.Kind == SymbolKindParameter {
+							availableIdentifiers = append(availableIdentifiers, s.Name)
+						}
 					}
 				}
 
-				if isAllCaps && len(identifierName) > 1 {
-					identifierType = "constant"
+				// Find the best match using Levenshtein distance
+				message := identifierName + " not found"
+				bestMatch := ""
+				bestDistance := 1000000
+
+				for _, name := range availableIdentifiers {
+					distance := levenshteinDistance(identifierName, name)
+					if distance < bestDistance {
+						bestDistance = distance
+						bestMatch = name
+					}
 				}
 
-				message := "Use of undeclared " + identifierType + " '" + identifierName + "'"
+				// Suggest similar identifier if distance is reasonable
+				// Threshold: max 3 edits or 40% of identifier name length
+				threshold := 3
+				if len(identifierName) > 7 {
+					threshold = (len(identifierName) * 2) / 5
+				}
+
+				if bestDistance <= threshold && bestMatch != "" {
+					message += ", did you mean " + bestMatch + "?"
+				}
 
 				lineText := ""
 				if node.Line > 0 && node.Line <= len(doc.Lines) {
@@ -1637,17 +1665,30 @@ func checkUndeclaredIdentifiers(doc *Document) []protocol.Diagnostic {
 			}
 
 		case ahoy.NODE_ASSIGNMENT, ahoy.NODE_VARIABLE_DECLARATION:
-			// For assignments, check the right side but not the left side
-			for i := 1; i < len(node.Children); i++ {
-				checkNode(node.Children[i], depth+1)
+			// For assignments, check the value (all children - variable name is in Value field)
+			for _, child := range node.Children {
+				checkNode(child, depth+1)
 			}
 			return
 
 		case ahoy.NODE_CONSTANT_DECLARATION:
-			// For const declarations, check the right side but not the name
-			for i := 1; i < len(node.Children); i++ {
+			// For const declarations, check the value (all children - constant name is in Value field)
+			for _, child := range node.Children {
+				checkNode(child, depth+1)
+			}
+			return
+
+		case ahoy.NODE_DICT_LITERAL, ahoy.NODE_OBJECT_LITERAL:
+			// For dict/object literals, only check the values (odd indices), not the keys (even indices)
+			// Children are: [key1, val1, key2, val2, ...]
+			for i := 1; i < len(node.Children); i += 2 {
 				checkNode(node.Children[i], depth+1)
 			}
+			return
+
+		case ahoy.NODE_LAMBDA:
+			// For lambdas, skip validation entirely - lambda parameters are implicitly defined
+			// and the body uses them. We can't easily track lambda scope so just skip.
 			return
 
 		case ahoy.NODE_FUNCTION:
@@ -1735,6 +1776,90 @@ func checkUndeclaredIdentifiers(doc *Document) []protocol.Diagnostic {
 			return
 
 		case ahoy.NODE_ENUM_DECLARATION, ahoy.NODE_STRUCT_DECLARATION:
+			return
+
+		case ahoy.NODE_ARRAY_ACCESS:
+			// For array access, check if the variable name (in Value field) is declared
+			varName := node.Value
+			if varName != "" {
+				// Look up the variable in current scope chain
+				var sym *Symbol
+				for i := len(scopeStack) - 1; i >= 0 && sym == nil; i-- {
+					sym = scopeStack[i].scope.Lookup(varName)
+				}
+				
+				if sym == nil {
+					// Variable not found - try to find a similar name
+					availableIdentifiers := []string{}
+					for _, s := range symbolTable.GlobalScope.Symbols {
+						if s.Kind == SymbolKindVariable || s.Kind == SymbolKindConstant || s.Kind == SymbolKindParameter {
+							availableIdentifiers = append(availableIdentifiers, s.Name)
+						}
+					}
+					// Also check child scopes
+					for _, childScope := range scope.Children {
+						for _, s := range childScope.Symbols {
+							if s.Kind == SymbolKindVariable || s.Kind == SymbolKindConstant || s.Kind == SymbolKindParameter {
+								availableIdentifiers = append(availableIdentifiers, s.Name)
+							}
+						}
+					}
+					
+					// Find best match using Levenshtein distance
+					message := varName + " not found"
+					bestMatch := ""
+					bestDistance := 1000000
+					
+					for _, name := range availableIdentifiers {
+						distance := levenshteinDistance(varName, name)
+						if distance < bestDistance {
+							bestDistance = distance
+							bestMatch = name
+						}
+					}
+					
+					// Suggest similar identifier if distance is reasonable
+					threshold := 3
+					if len(varName) > 7 {
+						threshold = (len(varName) * 2) / 5
+					}
+					
+					if bestDistance <= threshold && bestMatch != "" {
+						message += ", did you mean " + bestMatch + "?"
+					}
+					
+					lineText := ""
+					if node.Line > 0 && node.Line <= len(doc.Lines) {
+						lineText = doc.Lines[node.Line-1]
+					}
+					endChar := uint32(len(lineText))
+					if endChar == 0 {
+						endChar = uint32(len(varName) + 10)
+					}
+					
+					diagnostic := protocol.Diagnostic{
+						Range: protocol.Range{
+							Start: protocol.Position{
+								Line:      uint32(node.Line - 1),
+								Character: 0,
+							},
+							End: protocol.Position{
+								Line:      uint32(node.Line - 1),
+								Character: endChar,
+							},
+						},
+						Severity: protocol.DiagnosticSeverityError,
+						Source:   "ahoy",
+						Message:  message,
+						Code:     "undeclared-identifier",
+					}
+					diagnostics = append(diagnostics, diagnostic)
+				}
+			}
+			// Check index expression children
+			for _, child := range node.Children {
+				checkNode(child, depth+1)
+			}
 			return
 
 		case ahoy.NODE_CALL:

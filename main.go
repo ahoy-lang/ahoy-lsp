@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"ahoy"
+
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
@@ -110,73 +111,77 @@ func runValidate(filename string) {
 		AST:     ast,
 	}
 	doc.SymbolTable = BuildSymbolTable(ast)
-	
-	// Parse C headers from imports
-	doc.CHeaders, doc.CHeaderGlobal = extractCHeaderInfo(ast)
+
+	// Parse C headers from imports - use file URI for path resolution
+	doc.CHeaders, doc.CHeaderGlobal = extractCHeaderInfoWithURI(ast, doc.URI)
 
 	// Run all diagnostic checks (same as publishDiagnostics)
 	allDiagnostics := []protocol.Diagnostic{}
-	
+
 	// Check const reassignment
 	constDiags := checkConstReassignment(doc)
 	allDiagnostics = append(allDiagnostics, constDiags...)
-	
+
 	// Check const method calls
 	constMethodDiags := checkConstMethodCalls(doc)
 	allDiagnostics = append(allDiagnostics, constMethodDiags...)
-	
+
 	// Check invalid method calls
 	invalidMethodDiags := checkInvalidMethodCalls(doc)
 	allDiagnostics = append(allDiagnostics, invalidMethodDiags...)
-	
+
 	// Check return type violations
 	returnDiags := checkReturnTypeViolations(doc)
 	allDiagnostics = append(allDiagnostics, returnDiags...)
-	
+
 	// Check enum duplicates
 	enumDiags := checkEnumDuplicates(doc)
 	allDiagnostics = append(allDiagnostics, enumDiags...)
-	
+
 	// Check enum name duplicates
 	enumNameDiags := checkEnumNameDuplicates(doc)
 	allDiagnostics = append(allDiagnostics, enumNameDiags...)
-	
+
 	// Check undefined functions
 	undefinedFuncDiags := checkUndefinedFunctions(doc)
 	allDiagnostics = append(allDiagnostics, undefinedFuncDiags...)
-	
+
 	// Check undeclared identifiers
 	undeclaredDiags := checkUndeclaredIdentifiers(doc)
 	allDiagnostics = append(allDiagnostics, undeclaredDiags...)
-	
+
 	// Check function call argument counts
 	argCountDiags := checkFunctionCallArgumentCounts(doc)
 	allDiagnostics = append(allDiagnostics, argCountDiags...)
-	
+
 	// Check function call argument types
 	argTypeDiags := checkFunctionCallArgumentTypes(doc)
 	allDiagnostics = append(allDiagnostics, argTypeDiags...)
-	
+
 	// Check variable/constant type mismatches
 	typeMismatchDiags := checkTypeMismatches(doc)
 	allDiagnostics = append(allDiagnostics, typeMismatchDiags...)
-	
+
 	// Check struct member access
 	memberAccessDiags := checkStructMemberAccess(doc)
 	allDiagnostics = append(allDiagnostics, memberAccessDiags...)
-	
+
 	// Check object literal property assignment
 	objectPropDiags := checkObjectPropertyAssignment(doc)
 	allDiagnostics = append(allDiagnostics, objectPropDiags...)
-	
+
 	// Check type typos
 	typeTypoDiags := checkTypeTypos(doc)
 	allDiagnostics = append(allDiagnostics, typeTypoDiags...)
-	
+
 	// Check access syntax
 	accessSyntaxDiags := checkAccessSyntax(doc)
 	allDiagnostics = append(allDiagnostics, accessSyntaxDiags...)
-	
+
+	// Check binary operation types (string + int, etc.)
+	binaryOpDiags := checkBinaryOperationTypes(doc)
+	allDiagnostics = append(allDiagnostics, binaryOpDiags...)
+
 	// Filter for errors only
 	errorCount := 0
 	for _, diag := range allDiagnostics {
@@ -192,7 +197,7 @@ func runValidate(filename string) {
 	if errorCount > 0 {
 		os.Exit(1)
 	}
-	
+
 	fmt.Printf("✓ No errors found in %s\n", filename)
 }
 

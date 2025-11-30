@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -249,7 +250,7 @@ func (s *Server) handleDidOpen(ctx context.Context, reply jsonrpc2.Replier, req 
 
 		// Extract C header imports
 		debugLog.Printf("Extracting C header imports...")
-		doc.CHeaders, doc.CHeaderGlobal = extractCHeaderInfo(doc.AST)
+		doc.CHeaders, doc.CHeaderGlobal = extractCHeaderInfoWithURI(doc.AST, doc.URI)
 		debugLog.Printf("C headers extracted: %d namespaced, global has %d functions, %d enums, %d defines",
 			len(doc.CHeaders), len(doc.CHeaderGlobal.Functions), len(doc.CHeaderGlobal.Enums), len(doc.CHeaderGlobal.Defines))
 
@@ -398,7 +399,7 @@ func (s *Server) handleDidChange(ctx context.Context, reply jsonrpc2.Replier, re
 			doc.SymbolTable = BuildSymbolTable(doc.AST, doc.InferredParams)
 			doc.SymbolTable.Doc = doc // Set document reference
 			// Extract C header imports
-			doc.CHeaders, doc.CHeaderGlobal = extractCHeaderInfo(doc.AST)
+			doc.CHeaders, doc.CHeaderGlobal = extractCHeaderInfoWithURI(doc.AST, doc.URI)
 		} else {
 			doc.SymbolTable = NewSymbolTable()
 			doc.CHeaders = make(map[string]*ahoy.CHeaderInfo)
@@ -464,6 +465,12 @@ func (s *Server) getDocument(docURI uri.URI) *Document {
 
 // extractCHeaderInfo walks the AST and extracts C header import information
 func extractCHeaderInfo(ast *ahoy.ASTNode) (map[string]*ahoy.CHeaderInfo, *ahoy.CHeaderInfo) {
+	return extractCHeaderInfoWithURI(ast, "")
+}
+
+// extractCHeaderInfoWithURI walks the AST and extracts C header import information
+// with path resolution relative to the document URI
+func extractCHeaderInfoWithURI(ast *ahoy.ASTNode, docURI uri.URI) (map[string]*ahoy.CHeaderInfo, *ahoy.CHeaderInfo) {
 	cHeaders := make(map[string]*ahoy.CHeaderInfo)
 	cHeaderGlobal := &ahoy.CHeaderInfo{
 		Functions: make(map[string]*ahoy.CFunction),
@@ -474,6 +481,16 @@ func extractCHeaderInfo(ast *ahoy.ASTNode) (map[string]*ahoy.CHeaderInfo, *ahoy.
 
 	if ast == nil {
 		return cHeaders, cHeaderGlobal
+	}
+
+	// Get document directory for relative path resolution
+	var docDir string
+	if docURI != "" {
+		docPath := string(docURI)
+		if strings.HasPrefix(docPath, "file://") {
+			docPath = docPath[7:]
+		}
+		docDir = filepath.Dir(docPath)
 	}
 
 	// Walk through top-level nodes looking for imports
@@ -487,12 +504,17 @@ func extractCHeaderInfo(ast *ahoy.ASTNode) (map[string]*ahoy.CHeaderInfo, *ahoy.
 				continue
 			}
 
-			// Note: Path resolution is now handled in parser.go during ParseLintWithPath
-			// The path here should already be resolved if it was relative
+			// Resolve relative paths
+			resolvedPath := path
+			if docDir != "" && !filepath.IsAbs(path) {
+				resolvedPath = filepath.Join(docDir, path)
+				resolvedPath = filepath.Clean(resolvedPath)
+			}
+
 			// Parse the C header
-			headerInfo, err := ahoy.ParseCHeader(path)
+			headerInfo, err := ahoy.ParseCHeader(resolvedPath)
 			if err != nil {
-				debugLog.Printf("Failed to parse C header %s: %v", path, err)
+				debugLog.Printf("Failed to parse C header %s (resolved: %s): %v", path, resolvedPath, err)
 				continue
 			}
 
@@ -500,7 +522,7 @@ func extractCHeaderInfo(ast *ahoy.ASTNode) (map[string]*ahoy.CHeaderInfo, *ahoy.
 				// Store with namespace
 				cHeaders[namespace] = headerInfo
 				debugLog.Printf("Loaded C header %s with namespace '%s': %d functions, %d enums, %d structs",
-					path, namespace, len(headerInfo.Functions), len(headerInfo.Enums), len(headerInfo.Structs))
+					resolvedPath, namespace, len(headerInfo.Functions), len(headerInfo.Enums), len(headerInfo.Structs))
 			} else {
 				// Merge into global
 				for name, fn := range headerInfo.Functions {
@@ -516,7 +538,7 @@ func extractCHeaderInfo(ast *ahoy.ASTNode) (map[string]*ahoy.CHeaderInfo, *ahoy.
 					cHeaderGlobal.Structs[name] = str
 				}
 				debugLog.Printf("Loaded C header %s globally: %d functions, %d enums, %d structs",
-					path, len(headerInfo.Functions), len(headerInfo.Enums), len(headerInfo.Structs))
+					resolvedPath, len(headerInfo.Functions), len(headerInfo.Enums), len(headerInfo.Structs))
 			}
 		}
 	}

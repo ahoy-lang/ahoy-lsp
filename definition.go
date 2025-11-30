@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"path/filepath"
 	"strings"
 
 	"ahoy"
@@ -10,6 +11,21 @@ import (
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 )
+
+// resolveImportPath resolves a relative import path relative to the document URI
+func resolveImportPath(importPath string, docURI protocol.URI) string {
+	if filepath.IsAbs(importPath) {
+		return importPath
+	}
+	
+	docPath := string(docURI)
+	if strings.HasPrefix(docPath, "file://") {
+		docPath = docPath[7:]
+	}
+	docDir := filepath.Dir(docPath)
+	resolved := filepath.Join(docDir, importPath)
+	return filepath.Clean(resolved)
+}
 
 func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
 	var params protocol.DefinitionParams
@@ -37,14 +53,15 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 				// Find which import has this function
 				for _, child := range doc.AST.Children {
 					if child.Type == ahoy.NODE_IMPORT_STATEMENT && strings.HasSuffix(child.Value, ".h") {
+						resolvedPath := resolveImportPath(child.Value, params.TextDocument.URI)
 						location := protocol.Location{
-							URI: protocol.URI("file://" + child.Value),
+							URI: protocol.URI("file://" + resolvedPath),
 							Range: protocol.Range{
 								Start: protocol.Position{Line: uint32(cFunc.Line - 1), Character: 0},
 								End:   protocol.Position{Line: uint32(cFunc.Line - 1), Character: 100},
 							},
 						}
-						debugLog.Printf("Go to definition: C function %s -> %s:%d", word, child.Value, cFunc.Line)
+						debugLog.Printf("Go to definition: C function %s -> %s:%d", word, resolvedPath, cFunc.Line)
 						return reply(ctx, location, nil)
 					}
 				}
@@ -72,7 +89,7 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 				// Find the header file path from imports
 				for _, child := range doc.AST.Children {
 					if child.Type == ahoy.NODE_IMPORT_STATEMENT && strings.HasSuffix(child.Value, ".h") {
-						enumHeaderPath = child.Value
+						enumHeaderPath = resolveImportPath(child.Value, params.TextDocument.URI)
 						break
 					}
 				}
@@ -95,14 +112,15 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 		if cDefine, ok := doc.CHeaderGlobal.Defines[word]; ok {
 			for _, child := range doc.AST.Children {
 				if child.Type == ahoy.NODE_IMPORT_STATEMENT && strings.HasSuffix(child.Value, ".h") {
+					resolvedPath := resolveImportPath(child.Value, params.TextDocument.URI)
 					location := protocol.Location{
-						URI: protocol.URI("file://" + child.Value),
+						URI: protocol.URI("file://" + resolvedPath),
 						Range: protocol.Range{
 							Start: protocol.Position{Line: uint32(cDefine.Line - 1), Character: 0},
 							End:   protocol.Position{Line: uint32(cDefine.Line - 1), Character: 100},
 						},
 					}
-					debugLog.Printf("Go to definition: C define %s -> %s:%d", word, child.Value, cDefine.Line)
+					debugLog.Printf("Go to definition: C define %s -> %s:%d", word, resolvedPath, cDefine.Line)
 					return reply(ctx, location, nil)
 				}
 			}
@@ -113,14 +131,15 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 			if ahoy.ToLowerFirst(structName) == word || structName == word {
 				for _, child := range doc.AST.Children {
 					if child.Type == ahoy.NODE_IMPORT_STATEMENT && strings.HasSuffix(child.Value, ".h") {
+						resolvedPath := resolveImportPath(child.Value, params.TextDocument.URI)
 						location := protocol.Location{
-							URI: protocol.URI("file://" + child.Value),
+							URI: protocol.URI("file://" + resolvedPath),
 							Range: protocol.Range{
 								Start: protocol.Position{Line: uint32(cStruct.Line - 1), Character: 0},
 								End:   protocol.Position{Line: uint32(cStruct.Line - 1), Character: 100},
 							},
 						}
-						debugLog.Printf("Go to definition: C struct %s -> %s:%d", word, child.Value, cStruct.Line)
+						debugLog.Printf("Go to definition: C struct %s -> %s:%d", word, resolvedPath, cStruct.Line)
 						return reply(ctx, location, nil)
 					}
 				}
@@ -131,35 +150,47 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 	// Check namespaced C headers
 	for namespace, headerInfo := range doc.CHeaders {
 		// Check functions
-		for cFuncName := range headerInfo.Functions {
+		for cFuncName, cFunc := range headerInfo.Functions {
 			if ahoy.PascalToSnake(cFuncName) == word {
 				for _, child := range doc.AST.Children {
 					if child.Type == ahoy.NODE_IMPORT_STATEMENT && child.DataType == namespace && strings.HasSuffix(child.Value, ".h") {
+						resolvedPath := resolveImportPath(child.Value, params.TextDocument.URI)
 						location := protocol.Location{
-							URI: protocol.URI("file://" + child.Value),
+							URI: protocol.URI("file://" + resolvedPath),
 							Range: protocol.Range{
-								Start: protocol.Position{Line: 0, Character: 0},
-								End:   protocol.Position{Line: 0, Character: 0},
+								Start: protocol.Position{Line: uint32(cFunc.Line - 1), Character: 0},
+								End:   protocol.Position{Line: uint32(cFunc.Line - 1), Character: 100},
 							},
 						}
+						debugLog.Printf("Go to definition: namespaced C function %s -> %s:%d", word, resolvedPath, cFunc.Line)
 						return reply(ctx, location, nil)
 					}
 				}
 			}
 		}
 		
-		// Check enums/defines
-		if _, ok := headerInfo.Enums[word]; ok {
-			for _, child := range doc.AST.Children {
-				if child.Type == ahoy.NODE_IMPORT_STATEMENT && child.DataType == namespace {
-					location := protocol.Location{
-						URI: protocol.URI("file://" + child.Value),
-						Range: protocol.Range{
-							Start: protocol.Position{Line: 0, Character: 0},
-							End:   protocol.Position{Line: 0, Character: 0},
-						},
+		// Check enum values
+		for _, cEnum := range headerInfo.Enums {
+			if _, ok := cEnum.Values[word]; ok {
+				for _, child := range doc.AST.Children {
+					if child.Type == ahoy.NODE_IMPORT_STATEMENT && child.DataType == namespace {
+						resolvedPath := resolveImportPath(child.Value, params.TextDocument.URI)
+						lineNum := cEnum.Line
+						if cEnum.ValueLines != nil {
+							if valueLine, exists := cEnum.ValueLines[word]; exists {
+								lineNum = valueLine
+							}
+						}
+						location := protocol.Location{
+							URI: protocol.URI("file://" + resolvedPath),
+							Range: protocol.Range{
+								Start: protocol.Position{Line: uint32(lineNum - 1), Character: 0},
+								End:   protocol.Position{Line: uint32(lineNum - 1), Character: 100},
+							},
+						}
+						debugLog.Printf("Go to definition: namespaced C enum value %s -> %s:%d", word, resolvedPath, lineNum)
+						return reply(ctx, location, nil)
 					}
-					return reply(ctx, location, nil)
 				}
 			}
 		}
@@ -168,13 +199,15 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 		if cDefine, ok := headerInfo.Defines[word]; ok {
 			for _, child := range doc.AST.Children {
 				if child.Type == ahoy.NODE_IMPORT_STATEMENT && child.DataType == namespace {
+					resolvedPath := resolveImportPath(child.Value, params.TextDocument.URI)
 					location := protocol.Location{
-						URI: protocol.URI("file://" + child.Value),
+						URI: protocol.URI("file://" + resolvedPath),
 						Range: protocol.Range{
 							Start: protocol.Position{Line: uint32(cDefine.Line - 1), Character: 0},
 							End:   protocol.Position{Line: uint32(cDefine.Line - 1), Character: 100},
 						},
 					}
+					debugLog.Printf("Go to definition: namespaced C define %s -> %s:%d", word, resolvedPath, cDefine.Line)
 					return reply(ctx, location, nil)
 				}
 			}
@@ -185,14 +218,15 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 			if ahoy.ToLowerFirst(structName) == word || structName == word {
 				for _, child := range doc.AST.Children {
 					if child.Type == ahoy.NODE_IMPORT_STATEMENT && child.DataType == namespace {
+						resolvedPath := resolveImportPath(child.Value, params.TextDocument.URI)
 						location := protocol.Location{
-							URI: protocol.URI("file://" + child.Value),
+							URI: protocol.URI("file://" + resolvedPath),
 							Range: protocol.Range{
 								Start: protocol.Position{Line: uint32(cStruct.Line - 1), Character: 0},
 								End:   protocol.Position{Line: uint32(cStruct.Line - 1), Character: 100},
 							},
 						}
-						debugLog.Printf("Go to definition: C struct %s -> %s:%d", word, child.Value, cStruct.Line)
+						debugLog.Printf("Go to definition: namespaced C struct %s -> %s:%d", word, resolvedPath, cStruct.Line)
 						return reply(ctx, location, nil)
 					}
 				}
