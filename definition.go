@@ -50,98 +50,75 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 		// Check if it's a C function (snake_case name)
 		for cFuncName, cFunc := range doc.CHeaderGlobal.Functions {
 			if ahoy.PascalToSnake(cFuncName) == word {
-				// Find which import has this function
-				for _, child := range doc.AST.Children {
-					if child.Type == ahoy.NODE_IMPORT_STATEMENT && strings.HasSuffix(child.Value, ".h") {
-						resolvedPath := resolveImportPath(child.Value, params.TextDocument.URI)
-						location := protocol.Location{
-							URI: protocol.URI("file://" + resolvedPath),
-							Range: protocol.Range{
-								Start: protocol.Position{Line: uint32(cFunc.Line - 1), Character: 0},
-								End:   protocol.Position{Line: uint32(cFunc.Line - 1), Character: 100},
-							},
-						}
-						debugLog.Printf("Go to definition: C function %s -> %s:%d", word, resolvedPath, cFunc.Line)
-						return reply(ctx, location, nil)
+				// Use the File field directly from the function
+				if cFunc.File != "" {
+					location := protocol.Location{
+						URI: protocol.URI("file://" + cFunc.File),
+						Range: protocol.Range{
+							Start: protocol.Position{Line: uint32(cFunc.Line - 1), Character: 0},
+							End:   protocol.Position{Line: uint32(cFunc.Line - 1), Character: 100},
+						},
 					}
+					debugLog.Printf("Go to definition: C function %s -> %s:%d", word, cFunc.File, cFunc.Line)
+					return reply(ctx, location, nil)
 				}
 			}
 		}
 		
 		// Check if it's a C enum VALUE (not enum name)
-		foundEnumValue := false
-		var enumLineNum int
-		var enumHeaderPath string
-		
 		for _, cEnum := range doc.CHeaderGlobal.Enums {
 			if _, ok := cEnum.Values[word]; ok {
-				foundEnumValue = true
 				// Try to get the specific line for this enum value
+				enumLineNum := cEnum.Line
 				if cEnum.ValueLines != nil {
 					if valueLine, exists := cEnum.ValueLines[word]; exists {
 						enumLineNum = valueLine
-					} else {
-						enumLineNum = cEnum.Line
-					}
-				} else {
-					enumLineNum = cEnum.Line
-				}
-				// Find the header file path from imports
-				for _, child := range doc.AST.Children {
-					if child.Type == ahoy.NODE_IMPORT_STATEMENT && strings.HasSuffix(child.Value, ".h") {
-						enumHeaderPath = resolveImportPath(child.Value, params.TextDocument.URI)
-						break
 					}
 				}
-				break
+				// Use the File field directly from the enum
+				if cEnum.File != "" {
+					location := protocol.Location{
+						URI: protocol.URI("file://" + cEnum.File),
+						Range: protocol.Range{
+							Start: protocol.Position{Line: uint32(enumLineNum - 1), Character: 0},
+							End:   protocol.Position{Line: uint32(enumLineNum - 1), Character: 100},
+						},
+					}
+					debugLog.Printf("Go to definition: C enum value %s -> %s:%d", word, cEnum.File, enumLineNum)
+					return reply(ctx, location, nil)
+				}
 			}
-		}
-		
-		if foundEnumValue && enumHeaderPath != "" {
-			location := protocol.Location{
-				URI: protocol.URI("file://" + enumHeaderPath),
-				Range: protocol.Range{
-					Start: protocol.Position{Line: uint32(enumLineNum - 1), Character: 0},
-					End:   protocol.Position{Line: uint32(enumLineNum - 1), Character: 100},
-				},
-			}
-			debugLog.Printf("Go to definition: C enum value %s -> %s:%d", word, enumHeaderPath, enumLineNum)
-			return reply(ctx, location, nil)
 		}
 		
 		if cDefine, ok := doc.CHeaderGlobal.Defines[word]; ok {
-			for _, child := range doc.AST.Children {
-				if child.Type == ahoy.NODE_IMPORT_STATEMENT && strings.HasSuffix(child.Value, ".h") {
-					resolvedPath := resolveImportPath(child.Value, params.TextDocument.URI)
-					location := protocol.Location{
-						URI: protocol.URI("file://" + resolvedPath),
-						Range: protocol.Range{
-							Start: protocol.Position{Line: uint32(cDefine.Line - 1), Character: 0},
-							End:   protocol.Position{Line: uint32(cDefine.Line - 1), Character: 100},
-						},
-					}
-					debugLog.Printf("Go to definition: C define %s -> %s:%d", word, resolvedPath, cDefine.Line)
-					return reply(ctx, location, nil)
+			// Use the File field directly from the define
+			if cDefine.File != "" {
+				location := protocol.Location{
+					URI: protocol.URI("file://" + cDefine.File),
+					Range: protocol.Range{
+						Start: protocol.Position{Line: uint32(cDefine.Line - 1), Character: 0},
+						End:   protocol.Position{Line: uint32(cDefine.Line - 1), Character: 100},
+					},
 				}
+				debugLog.Printf("Go to definition: C define %s -> %s:%d", word, cDefine.File, cDefine.Line)
+				return reply(ctx, location, nil)
 			}
 		}
 		
 		// Check C structs (case-insensitive)
 		for structName, cStruct := range doc.CHeaderGlobal.Structs {
 			if ahoy.ToLowerFirst(structName) == word || structName == word {
-				for _, child := range doc.AST.Children {
-					if child.Type == ahoy.NODE_IMPORT_STATEMENT && strings.HasSuffix(child.Value, ".h") {
-						resolvedPath := resolveImportPath(child.Value, params.TextDocument.URI)
-						location := protocol.Location{
-							URI: protocol.URI("file://" + resolvedPath),
-							Range: protocol.Range{
-								Start: protocol.Position{Line: uint32(cStruct.Line - 1), Character: 0},
-								End:   protocol.Position{Line: uint32(cStruct.Line - 1), Character: 100},
-							},
-						}
-						debugLog.Printf("Go to definition: C struct %s -> %s:%d", word, resolvedPath, cStruct.Line)
-						return reply(ctx, location, nil)
+				// Use the File field directly from the struct
+				if cStruct.File != "" {
+					location := protocol.Location{
+						URI: protocol.URI("file://" + cStruct.File),
+						Range: protocol.Range{
+							Start: protocol.Position{Line: uint32(cStruct.Line - 1), Character: 0},
+							End:   protocol.Position{Line: uint32(cStruct.Line - 1), Character: 100},
+						},
 					}
+					debugLog.Printf("Go to definition: C struct %s -> %s:%d", word, cStruct.File, cStruct.Line)
+					return reply(ctx, location, nil)
 				}
 			}
 		}
