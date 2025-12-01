@@ -26,7 +26,7 @@ func checkTypeTypos(doc *Document) []protocol.Diagnostic {
 		"int", "float", "bool", "char", "string", "void",
 		"array", "dict", "HashMap", "AhoyArray",
 		"int64", "float64", "uint8", "uint16", "uint32", "uint64",
-		"infer", "generic", // Special types for type inference
+		"infer", "generic", "any", // Special types for type inference
 		"object", // Anonymous object type
 	}
 	for _, t := range builtinTypes {

@@ -182,6 +182,10 @@ func runValidate(filename string) {
 	binaryOpDiags := checkBinaryOperationTypes(doc)
 	allDiagnostics = append(allDiagnostics, binaryOpDiags...)
 
+	// Check for unhandled multi-return function calls
+	unhandledReturnDiags := checkUnhandledMultiReturns(doc)
+	allDiagnostics = append(allDiagnostics, unhandledReturnDiags...)
+
 	// Filter for errors only
 	errorCount := 0
 	for _, diag := range allDiagnostics {

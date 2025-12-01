@@ -323,7 +323,7 @@ func buildHoverText(symbol *Symbol) string {
 		params := []string{}
 		for _, param := range symbol.Parameters {
 			paramStr := param.Name
-			if param.Type != "" && param.Type != "generic" {
+			if param.Type != "" && param.Type != "generic" && param.Type != "any" {
 				paramStr += ":" + param.Type
 			}
 			params = append(params, paramStr)

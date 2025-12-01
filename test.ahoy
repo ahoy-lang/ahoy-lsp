@@ -124,7 +124,7 @@ person<"test"> : "hello"
 person.test : "hello"
 
 
-struct person:
+struct Person:
 	name: string age: int
 	type dwarf:
 		10 height:int
@@ -133,7 +133,7 @@ struct person:
 $
 
 
-person2: person{name: "Alice", age: 30, height: 12} ? would be inferred as person.dwarf type
+person2: Person{name: "Alice", age: 30, height: 12} ? would be inferred as person.dwarf type
 print|person2|
 print|f"{person.name}"|
 

@@ -472,7 +472,7 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 					params := []string{}
 					for _, param := range sym.Parameters {
 						paramStr := param.Name
-						if param.Type != "" && param.Type != "generic" {
+						if param.Type != "" && param.Type != "generic" && param.Type != "any" {
 							paramStr += ":" + param.Type
 						}
 						params = append(params, paramStr)

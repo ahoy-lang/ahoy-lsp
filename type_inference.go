@@ -37,8 +37,8 @@ func inferFunctionReturnTypes(funcNode *ahoy.ASTNode, argTypes []string, doc *Do
 				paramName := param.Value
 				paramType := param.DataType
 				
-				// If parameter has no explicit type or is generic, use inferred type from arguments
-				if (paramType == "" || paramType == "generic" || paramType == "infer") && i < len(argTypes) {
+				// If parameter has no explicit type or is generic/any, use inferred type from arguments
+				if (paramType == "" || paramType == "generic" || paramType == "any" || paramType == "infer") && i < len(argTypes) {
 					paramType = argTypes[i]
 				}
 				
@@ -119,7 +119,7 @@ func inferExpressionTypeWithParams(node *ahoy.ASTNode, paramTypes map[string]str
 		// Then look up in symbol table if available
 		if doc != nil && doc.SymbolTable != nil {
 			if sym := doc.SymbolTable.Lookup(node.Value); sym != nil {
-				if sym.Type != "" && sym.Type != "infer" && sym.Type != "generic" {
+				if sym.Type != "" && sym.Type != "infer" && sym.Type != "generic" && sym.Type != "any" {
 					return sym.Type
 				}
 			}
@@ -170,7 +170,7 @@ if ast == nil {
 return result
 }
 
-// First pass: collect functions and initialize with generic types
+// First pass: collect functions and initialize with any types
 functions := make(map[string]*ahoy.ASTNode)
 var collectFuncs func(*ahoy.ASTNode)
 collectFuncs = func(node *ahoy.ASTNode) {
@@ -181,12 +181,12 @@ if node.Type == ahoy.NODE_FUNCTION {
 funcName := node.Value
 functions[funcName] = node
 
-// Initialize with generic types
+// Initialize with any types
 if len(node.Children) > 0 {
 params := node.Children[0]
 paramTypes := make([]string, len(params.Children))
 for i := range paramTypes {
-paramTypes[i] = "generic"
+paramTypes[i] = "any"
 }
 result[funcName] = paramTypes
 }
@@ -225,9 +225,9 @@ funcName := node.Value
 if paramTypes, exists := result[funcName]; exists {
 // Analyze arguments
 for i, arg := range node.Children {
-if i < len(paramTypes) && paramTypes[i] == "generic" {
+if i < len(paramTypes) && (paramTypes[i] == "generic" || paramTypes[i] == "any") {
 argType := inferExpressionType(arg, doc)
-if argType != "generic" && argType != "unknown" {
+if argType != "generic" && argType != "any" && argType != "unknown" {
 paramTypes[i] = argType
 }
 }
@@ -258,7 +258,7 @@ if len(node.Children) > 0 {
 condition := node.Children[0]
 if condition.Type == ahoy.NODE_IDENTIFIER {
 if paramIdx, exists := paramNames[condition.Value]; exists {
-if inferredTypes[paramIdx] == "generic" {
+if inferredTypes[paramIdx] == "generic" || inferredTypes[paramIdx] == "any" {
 inferredTypes[paramIdx] = "bool"
 }
 }
@@ -275,12 +275,12 @@ method := node.Value
 
 // Array methods
 if method == "length" || method == "push" || method == "pop" {
-if inferredTypes[paramIdx] == "generic" {
+if inferredTypes[paramIdx] == "generic" || inferredTypes[paramIdx] == "any" {
 inferredTypes[paramIdx] = "array"
 }
 } else if method == "has" || method == "size" || method == "keys" || method == "values" {
 // Dict methods
-if inferredTypes[paramIdx] == "generic" {
+if inferredTypes[paramIdx] == "generic" || inferredTypes[paramIdx] == "any" {
 inferredTypes[paramIdx] = "dict"
 }
 }
@@ -291,7 +291,7 @@ inferredTypes[paramIdx] = "dict"
 // Check for array access
 if node.Type == ahoy.NODE_ARRAY_ACCESS {
 if paramIdx, exists := paramNames[node.Value]; exists {
-if inferredTypes[paramIdx] == "generic" {
+if inferredTypes[paramIdx] == "generic" || inferredTypes[paramIdx] == "any" {
 inferredTypes[paramIdx] = "array"
 }
 }
@@ -300,7 +300,7 @@ inferredTypes[paramIdx] = "array"
 // Check for dict/object access
 if node.Type == ahoy.NODE_DICT_ACCESS || node.Type == ahoy.NODE_OBJECT_ACCESS {
 if paramIdx, exists := paramNames[node.Value]; exists {
-if inferredTypes[paramIdx] == "generic" {
+if inferredTypes[paramIdx] == "generic" || inferredTypes[paramIdx] == "any" {
 inferredTypes[paramIdx] = "dict"
 }
 }
@@ -311,7 +311,7 @@ if node.Type == ahoy.NODE_FOR_IN_DICT_LOOP && len(node.Children) > 2 {
 if node.Children[2].Type == ahoy.NODE_IDENTIFIER {
 paramName := node.Children[2].Value
 if paramIdx, exists := paramNames[paramName]; exists {
-if inferredTypes[paramIdx] == "generic" {
+if inferredTypes[paramIdx] == "generic" || inferredTypes[paramIdx] == "any" {
 inferredTypes[paramIdx] = "dict"
 }
 }
@@ -323,7 +323,7 @@ if node.Type == ahoy.NODE_FOR_IN_ARRAY_LOOP && len(node.Children) > 1 {
 if node.Children[1].Type == ahoy.NODE_IDENTIFIER {
 paramName := node.Children[1].Value
 if paramIdx, exists := paramNames[paramName]; exists {
-if inferredTypes[paramIdx] == "generic" {
+if inferredTypes[paramIdx] == "generic" || inferredTypes[paramIdx] == "any" {
 inferredTypes[paramIdx] = "array"
 }
 }

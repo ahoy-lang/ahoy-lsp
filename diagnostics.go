@@ -112,6 +112,10 @@ func (s *Server) publishDiagnostics(ctx context.Context, doc *Document) {
 			// Check for invalid binary operations (string + number, etc.)
 			binaryOpDiags := checkBinaryOperationTypes(doc)
 			diagnostics = append(diagnostics, binaryOpDiags...)
+			
+			// Check for unhandled multi-return function calls
+			unhandledReturnDiags := checkUnhandledMultiReturns(doc)
+			diagnostics = append(diagnostics, unhandledReturnDiags...)
 		}
 	}
 
@@ -824,7 +828,7 @@ func checkReturnTypeViolations(doc *Document) []protocol.Diagnostic {
 							expectedTypes := strings.Split(returnType, ",")
 							matches := false
 							for _, et := range expectedTypes {
-								if strings.TrimSpace(et) == returnedType || strings.TrimSpace(et) == "generic" {
+								if strings.TrimSpace(et) == returnedType || strings.TrimSpace(et) == "generic" || strings.TrimSpace(et) == "any" {
 									matches = true
 									break
 								}
@@ -2431,9 +2435,10 @@ func checkFunctionCallArgumentTypes(doc *Document) []protocol.Diagnostic {
 						expected := expectedTypes[i]
 						actual := actualTypes[i]
 
-						// Skip if either type is unknown, generic, or infer
+						// Skip if either type is unknown, generic, any, or infer
 						if expected == "" || expected == "unknown" || actual == "unknown" ||
 							expected == "generic" || actual == "generic" ||
+							expected == "any" || actual == "any" ||
 							expected == "infer" || actual == "infer" {
 							continue
 						}
@@ -2624,7 +2629,7 @@ func checkTypeMismatches(doc *Document) []protocol.Diagnostic {
 
 				// Check type compatibility - handle explicitly typed collections and type aliases
 				typeMismatch := false
-				if actualType != "unknown" && expectedType != "generic" {
+				if actualType != "unknown" && expectedType != "generic" && expectedType != "any" {
 					// For explicitly typed collections (array[type], dict<key,val>),
 					// the inferred type will be just "array" or "dict"
 					// This is valid - the explicit type provides the full information
@@ -2694,7 +2699,7 @@ func checkTypeMismatches(doc *Document) []protocol.Diagnostic {
 
 				// Check type compatibility - handle explicitly typed collections
 				typeMismatch := false
-				if actualType != "unknown" && actualType != expectedType && expectedType != "generic" {
+				if actualType != "unknown" && actualType != expectedType && expectedType != "generic" && expectedType != "any" {
 					// For explicitly typed collections (array[type], dict[key,val]),
 					// the inferred type will be just "array" or "dict"
 					// This is valid - the explicit type provides the full information
@@ -2879,9 +2884,9 @@ func inferExpressionType(node *ahoy.ASTNode, doc *Document) string {
 		if sig, exists := funcSignatures[funcName]; exists {
 			returnType := sig.ReturnType
 
-			// If return type is "infer" or empty (generic), infer from arguments
-			if returnType == "infer" || returnType == "" || returnType == "generic" {
-				// For infer/generic returns, we need to trace through the function body
+			// If return type is "infer" or empty (generic/any), infer from arguments
+			if returnType == "infer" || returnType == "" || returnType == "generic" || returnType == "any" {
+				// For infer/generic/any returns, we need to trace through the function body
 				// to determine what's actually returned based on the argument types
 				// For now, we'll look at the arguments to infer parameter types
 				if len(node.Children) > 0 {
@@ -2892,8 +2897,8 @@ func inferExpressionType(node *ahoy.ASTNode, doc *Document) string {
 							paramName := sig.Parameters[i].Name
 							paramType := sig.Parameters[i].Type
 
-							// If parameter type is empty/generic, infer from argument
-							if paramType == "" || paramType == "generic" {
+							// If parameter type is empty/generic/any, infer from argument
+							if paramType == "" || paramType == "generic" || paramType == "any" {
 								argType := inferExpressionType(arg, doc)
 								inferredParamTypes[paramName] = argType
 							}
@@ -3183,7 +3188,7 @@ func checkRedundantDeferFrees(doc *Document) []protocol.Diagnostic {
 								returnType := funcSym.Type
 								
 								// If return type is "infer", try to infer it
-								if returnType == "infer" || returnType == "" || returnType == "generic" {
+								if returnType == "infer" || returnType == "" || returnType == "generic" || returnType == "any" {
 									// Find the function node and infer from its body
 									var funcNode *ahoy.ASTNode
 									var findFunc func(*ahoy.ASTNode)
@@ -3246,7 +3251,7 @@ func checkRedundantDeferFrees(doc *Document) []protocol.Diagnostic {
 								returnTypeStr := funcSym.Type
 								
 								// If return type is "infer", try to infer it
-								if returnTypeStr == "infer" || returnTypeStr == "" || returnTypeStr == "generic" {
+								if returnTypeStr == "infer" || returnTypeStr == "" || returnTypeStr == "generic" || returnTypeStr == "any" {
 									// Find the function node and infer from its body
 									var funcNode *ahoy.ASTNode
 									var findFunc func(*ahoy.ASTNode)

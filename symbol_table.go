@@ -417,10 +417,10 @@ func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
 						
 						// Get parameter type - use explicit type if provided, otherwise inferred
 						paramType := paramNode.DataType
-						if (paramType == "" || paramType == "generic") && st.InferredParams != nil {
+						if (paramType == "" || paramType == "generic" || paramType == "any") && st.InferredParams != nil {
 							if inferredTypes, exists := st.InferredParams[funcName]; exists && paramIdx < len(inferredTypes) {
 								inferredType := inferredTypes[paramIdx]
-								if inferredType != "generic" && inferredType != "" {
+								if inferredType != "generic" && inferredType != "any" && inferredType != "" {
 									paramType = inferredType
 									debugLog.Printf("Using inferred type '%s' for parameter '%s' in function '%s'", paramType, paramNode.Value, funcName)
 								}
@@ -526,8 +526,8 @@ func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
 							if funcSymbol != nil {
 								returnTypeStr = funcSymbol.Type
 								
-								// If function has infer/generic return type, try to infer it on the fly
-								if returnTypeStr == "infer" || returnTypeStr == "" || returnTypeStr == "generic" {
+								// If function has infer/generic/any return type, try to infer it on the fly
+								if returnTypeStr == "infer" || returnTypeStr == "" || returnTypeStr == "generic" || returnTypeStr == "any" {
 									// Find the function node in the AST
 									var funcNode *ahoy.ASTNode
 									var findFunc func(*ahoy.ASTNode)
@@ -1002,8 +1002,8 @@ func (st *SymbolTable) inferType(node *ahoy.ASTNode) string {
 			
 			debugLog.Printf("DEBUG inferType: Function %s has return type: %s", funcName, returnType)
 			
-			// If function has infer/generic return type, actually infer it
-			if returnType == "infer" || returnType == "" || returnType == "generic" || strings.Contains(returnType, "generic") {
+			// If function has infer/generic/any return type, actually infer it
+			if returnType == "infer" || returnType == "" || returnType == "generic" || returnType == "any" || strings.Contains(returnType, "generic") || strings.Contains(returnType, "any") {
 				debugLog.Printf("DEBUG inferType: Need to infer for %s", funcName)
 				
 				// Find the function node in the AST

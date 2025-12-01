@@ -27,8 +27,8 @@ func resolveAllInferReturnTypes(ast *ahoy.ASTNode, doc *Document) map[string][]s
 			funcName := node.Value
 			functionNodes[funcName] = node
 
-			// If function has explicit return types (not infer), store them
-			if node.DataType != "" && node.DataType != "infer" && node.DataType != "generic" {
+			// If function has explicit return types (not infer/any), store them
+			if node.DataType != "" && node.DataType != "infer" && node.DataType != "generic" && node.DataType != "any" {
 				// Split multiple return types (e.g., "dict<string,int>,dict<string,int>")
 				returnTypes := splitReturnTypesHelper(node.DataType)
 				resolvedTypes[funcName] = returnTypes
@@ -105,7 +105,7 @@ func inferFunctionReturnTypesWithContext(funcNode *ahoy.ASTNode, argTypes []stri
 				paramType := param.DataType
 
 				// If parameter has no explicit type, use inferred type from arguments
-				if (paramType == "" || paramType == "generic" || paramType == "infer") && i < len(argTypes) {
+				if (paramType == "" || paramType == "generic" || paramType == "any" || paramType == "infer") && i < len(argTypes) {
 					paramType = argTypes[i]
 				}
 
