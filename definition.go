@@ -3,14 +3,220 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"ahoy"
 
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 )
+
+// StdlibMethod represents a method definition from the stdlib
+type StdlibMethod struct {
+	Name       string // Method name (e.g., "length", "push")
+	Category   string // "array", "dict", "string", or "builtin"
+	Line       int    // Line number in stdlib file
+	ReturnType string
+	Params     string
+	Doc        string
+}
+
+var (
+	stdlibMethods     map[string]StdlibMethod
+	stdlibPath        string
+	stdlibLoadOnce    sync.Once
+	stdlibLoadErr     error
+)
+
+// getStdlibPath returns the path to the stdlib file in the ahoy cache directory
+func getStdlibPath() string {
+	cacheDir, err := os.UserCacheDir()
+	if err != nil {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return ""
+		}
+		cacheDir = filepath.Join(homeDir, ".cache")
+	}
+	
+	// Check in ahoy cache directory (created by ahoy compiler)
+	cachedPath := filepath.Join(cacheDir, "ahoy", "ahoy_stdlib.ahoy")
+	if _, err := os.Stat(cachedPath); err == nil {
+		return cachedPath
+	}
+	
+	return ""
+}
+
+// loadStdlib loads and parses the stdlib file
+func loadStdlib() {
+	stdlibLoadOnce.Do(func() {
+		stdlibMethods = make(map[string]StdlibMethod)
+		stdlibPath = getStdlibPath()
+		
+		if stdlibPath == "" {
+			debugLog.Printf("Stdlib not found")
+			return
+		}
+		
+		content, err := os.ReadFile(stdlibPath)
+		if err != nil {
+			stdlibLoadErr = err
+			debugLog.Printf("Failed to read stdlib: %v", err)
+			return
+		}
+		
+		lines := strings.Split(string(content), "\n")
+		var currentCategory string
+		var currentDoc strings.Builder
+		
+		for i, line := range lines {
+			lineNum := i + 1
+			trimmed := strings.TrimSpace(line)
+			
+			// Track category sections
+			if strings.HasPrefix(trimmed, "? ARRAY METHODS") {
+				currentCategory = "array"
+			} else if strings.HasPrefix(trimmed, "? DICTIONARY METHODS") {
+				currentCategory = "dict"
+			} else if strings.HasPrefix(trimmed, "? STRING METHODS") {
+				currentCategory = "string"
+			} else if strings.HasPrefix(trimmed, "? BUILT-IN FUNCTIONS") {
+				currentCategory = "builtin"
+			}
+			
+			// Collect documentation comments
+			if strings.HasPrefix(trimmed, "?") {
+				currentDoc.WriteString(strings.TrimPrefix(trimmed, "? "))
+				currentDoc.WriteString("\n")
+				continue
+			}
+			
+			// Parse function definitions
+			if strings.HasPrefix(trimmed, "@ ") {
+				// Format: @ method_name |params| return_type:
+				parts := strings.SplitN(trimmed, "|", 3)
+				if len(parts) >= 2 {
+					funcName := strings.TrimSpace(strings.TrimPrefix(parts[0], "@ "))
+					
+					// Extract the actual method name from prefixed names like "array_length"
+					methodName := funcName
+					if strings.HasPrefix(funcName, "array_") {
+						methodName = strings.TrimPrefix(funcName, "array_")
+					} else if strings.HasPrefix(funcName, "dict_") {
+						methodName = strings.TrimPrefix(funcName, "dict_")
+					} else if strings.HasPrefix(funcName, "string_") {
+						methodName = strings.TrimPrefix(funcName, "string_")
+					}
+					
+					params := ""
+					returnType := ""
+					if len(parts) >= 3 {
+						params = parts[1]
+						retPart := parts[2]
+						if idx := strings.Index(retPart, ":"); idx != -1 {
+							returnType = strings.TrimSpace(retPart[:idx])
+						}
+					}
+					
+					// Store with both full name and method name
+					method := StdlibMethod{
+						Name:       methodName,
+						Category:   currentCategory,
+						Line:       lineNum,
+						ReturnType: returnType,
+						Params:     params,
+						Doc:        currentDoc.String(),
+					}
+					stdlibMethods[funcName] = method
+					// Also store by just method name for easier lookup
+					if methodName != funcName {
+						key := currentCategory + "." + methodName
+						stdlibMethods[key] = method
+					}
+					
+					currentDoc.Reset()
+				}
+			}
+		}
+		
+		debugLog.Printf("Loaded %d stdlib methods from %s", len(stdlibMethods), stdlibPath)
+	})
+}
+
+// getStdlibMethodLocation returns the location of a stdlib method
+func getStdlibMethodLocation(methodName string, objectType string) *protocol.Location {
+	loadStdlib()
+	
+	if stdlibPath == "" || len(stdlibMethods) == 0 {
+		return nil
+	}
+	
+	// Determine category based on object type
+	category := ""
+	switch {
+	case objectType == "array" || strings.HasPrefix(objectType, "array[") || objectType == "AhoyArray*":
+		category = "array"
+	case objectType == "dict" || strings.HasPrefix(objectType, "dict<") || objectType == "HashMap*":
+		category = "dict"
+	case objectType == "string" || objectType == "char*":
+		category = "string"
+	}
+	
+	// Try category-specific lookup first
+	if category != "" {
+		key := category + "." + methodName
+		if method, ok := stdlibMethods[key]; ok {
+			return &protocol.Location{
+				URI: protocol.URI("file://" + stdlibPath),
+				Range: protocol.Range{
+					Start: protocol.Position{Line: uint32(method.Line - 1), Character: 0},
+					End:   protocol.Position{Line: uint32(method.Line - 1), Character: 100},
+				},
+			}
+		}
+		// Also try with category prefix
+		prefixedName := category + "_" + methodName
+		if method, ok := stdlibMethods[prefixedName]; ok {
+			return &protocol.Location{
+				URI: protocol.URI("file://" + stdlibPath),
+				Range: protocol.Range{
+					Start: protocol.Position{Line: uint32(method.Line - 1), Character: 0},
+					End:   protocol.Position{Line: uint32(method.Line - 1), Character: 100},
+				},
+			}
+		}
+	}
+	
+	// Try all categories
+	for _, cat := range []string{"array", "dict", "string", "builtin"} {
+		key := cat + "." + methodName
+		if method, ok := stdlibMethods[key]; ok {
+			return &protocol.Location{
+				URI: protocol.URI("file://" + stdlibPath),
+				Range: protocol.Range{
+					Start: protocol.Position{Line: uint32(method.Line - 1), Character: 0},
+					End:   protocol.Position{Line: uint32(method.Line - 1), Character: 100},
+				},
+			}
+		}
+		prefixedName := cat + "_" + methodName
+		if method, ok := stdlibMethods[prefixedName]; ok {
+			return &protocol.Location{
+				URI: protocol.URI("file://" + stdlibPath),
+				Range: protocol.Range{
+					Start: protocol.Position{Line: uint32(method.Line - 1), Character: 0},
+					End:   protocol.Position{Line: uint32(method.Line - 1), Character: 100},
+				},
+			}
+		}
+	}
+	
+	return nil
+}
 
 // resolveImportPath resolves a relative import path relative to the document URI
 func resolveImportPath(importPath string, docURI protocol.URI) string {
@@ -207,6 +413,62 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 						return reply(ctx, location, nil)
 					}
 				}
+			}
+		}
+	}
+
+	// Check for stdlib method calls (array.push, dict.keys, string.upper, etc.)
+	// Look for method call context by checking if cursor is after a dot
+	line := ""
+	if int(params.Position.Line) < len(doc.Lines) {
+		line = doc.Lines[int(params.Position.Line)]
+	}
+	
+	// Find if we're in a method call context
+	charPos := int(params.Position.Character)
+	if charPos > 0 && charPos <= len(line) {
+		// Look backward for a dot
+		beforeCursor := line[:charPos]
+		if dotIdx := strings.LastIndex(beforeCursor, "."); dotIdx >= 0 {
+			// Get the object before the dot
+			objectPart := strings.TrimSpace(beforeCursor[:dotIdx])
+			// Extract the last identifier before the dot
+			objectName := ""
+			for i := len(objectPart) - 1; i >= 0; i-- {
+				ch := objectPart[i]
+				if (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '_' {
+					continue
+				}
+				objectName = objectPart[i+1:]
+				break
+			}
+			if objectName == "" && len(objectPart) > 0 {
+				objectName = objectPart
+			}
+			
+			// Try to infer object type
+			objectType := ""
+			if doc.SymbolTable != nil {
+				if sym := doc.SymbolTable.Lookup(objectName); sym != nil {
+					objectType = sym.Type
+				}
+			}
+			
+			// Check if word is a stdlib method
+			if location := getStdlibMethodLocation(word, objectType); location != nil {
+				debugLog.Printf("Go to definition: stdlib method %s -> %s:%d", word, stdlibPath, location.Range.Start.Line+1)
+				return reply(ctx, *location, nil)
+			}
+		}
+	}
+	
+	// Also check if the word itself is a builtin function like print, log, panic
+	builtinFuncs := []string{"print", "log", "panic", "assert", "free"}
+	for _, builtin := range builtinFuncs {
+		if word == builtin {
+			if location := getStdlibMethodLocation(word, "builtin"); location != nil {
+				debugLog.Printf("Go to definition: builtin function %s -> %s:%d", word, stdlibPath, location.Range.Start.Line+1)
+				return reply(ctx, *location, nil)
 			}
 		}
 	}
