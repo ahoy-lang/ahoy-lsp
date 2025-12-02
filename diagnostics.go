@@ -116,6 +116,10 @@ func (s *Server) publishDiagnostics(ctx context.Context, doc *Document) {
 			// Check for unhandled multi-return function calls
 			unhandledReturnDiags := checkUnhandledMultiReturns(doc)
 			diagnostics = append(diagnostics, unhandledReturnDiags...)
+			
+			// Check for missing = between typed collections and their values
+			missingEqualsDiags := checkMissingEqualsInTypedCollections(doc)
+			diagnostics = append(diagnostics, missingEqualsDiags...)
 		}
 	}
 
@@ -629,7 +633,15 @@ func checkInvalidMethodCalls(doc *Document) []protocol.Diagnostic {
 
 				// Check if method exists for the type
 				var validMethods []string
-				switch targetType {
+				baseTargetType := targetType
+				// Handle typed arrays like array[string] and typed dicts like dict<string,string>
+				if strings.HasPrefix(targetType, "array[") || strings.HasPrefix(targetType, "array<") {
+					baseTargetType = "array"
+				} else if strings.HasPrefix(targetType, "dict<") || strings.HasPrefix(targetType, "dict[") {
+					baseTargetType = "dict"
+				}
+				
+				switch baseTargetType {
 				case "string":
 					validMethods = getValidStringMethods()
 				case "array":
@@ -3567,4 +3579,90 @@ func checkInvalidFreeOperations(doc *Document) []protocol.Diagnostic {
 
 	checkFunction(doc.AST)
 	return diagnostics
+}
+
+// checkMissingEqualsInTypedCollections checks for missing = between typed collections and their values
+// e.g., words:array[string] ["hello"] should be words:array[string]= ["hello"]
+func checkMissingEqualsInTypedCollections(doc *Document) []protocol.Diagnostic {
+diagnostics := []protocol.Diagnostic{}
+
+if doc.Lines == nil {
+return diagnostics
+}
+
+// Regex patterns to find typed collections followed by literals without =
+// Pattern: array[type] [ or dict<type,type> <
+for lineNum, line := range doc.Lines {
+trimmed := strings.TrimSpace(line)
+if trimmed == "" || strings.HasPrefix(trimmed, "?") {
+continue
+}
+
+// Check for array[type] [ (missing =)
+// Pattern: :array[something] [
+arrayTypeIdx := strings.Index(line, "array[")
+if arrayTypeIdx != -1 {
+// Find the closing ]
+closeIdx := findMatchingBracket(line, arrayTypeIdx+5, '[', ']')
+if closeIdx != -1 && closeIdx+1 < len(line) {
+afterType := strings.TrimSpace(line[closeIdx+1:])
+// Check if immediately followed by [ without =
+if strings.HasPrefix(afterType, "[") {
+diagnostic := protocol.Diagnostic{
+Range: protocol.Range{
+Start: protocol.Position{Line: uint32(lineNum), Character: uint32(closeIdx + 1)},
+End:   protocol.Position{Line: uint32(lineNum), Character: uint32(closeIdx + 2)},
+},
+Severity: protocol.DiagnosticSeverityWarning,
+Source:   "ahoy",
+Message:  "Missing '=' between array type and value literal. Use: array[type]= [values]",
+Code:     "missing-equals",
+}
+diagnostics = append(diagnostics, diagnostic)
+}
+}
+}
+
+// Check for dict<type,type> < (missing =)
+dictTypeIdx := strings.Index(line, "dict<")
+if dictTypeIdx != -1 {
+// Find the closing >
+closeIdx := findMatchingBracket(line, dictTypeIdx+4, '<', '>')
+if closeIdx != -1 && closeIdx+1 < len(line) {
+afterType := strings.TrimSpace(line[closeIdx+1:])
+// Check if immediately followed by < without =
+if strings.HasPrefix(afterType, "<") {
+diagnostic := protocol.Diagnostic{
+Range: protocol.Range{
+Start: protocol.Position{Line: uint32(lineNum), Character: uint32(closeIdx + 1)},
+End:   protocol.Position{Line: uint32(lineNum), Character: uint32(closeIdx + 2)},
+},
+Severity: protocol.DiagnosticSeverityWarning,
+Source:   "ahoy",
+Message:  "Missing '=' between dict type and value literal. Use: dict<key,value>= <values>",
+Code:     "missing-equals",
+}
+diagnostics = append(diagnostics, diagnostic)
+}
+}
+}
+}
+
+return diagnostics
+}
+
+// findMatchingBracket finds the index of the closing bracket that matches the opening bracket
+func findMatchingBracket(line string, startIdx int, open byte, close byte) int {
+depth := 1
+for i := startIdx + 1; i < len(line); i++ {
+if line[i] == open {
+depth++
+} else if line[i] == close {
+depth--
+if depth == 0 {
+return i
+}
+}
+}
+return -1
 }

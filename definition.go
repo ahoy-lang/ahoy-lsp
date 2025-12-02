@@ -42,10 +42,16 @@ func getStdlibPath() string {
 		cacheDir = filepath.Join(homeDir, ".cache")
 	}
 	
-	// Check in ahoy cache directory (created by ahoy compiler)
-	cachedPath := filepath.Join(cacheDir, "ahoy", "ahoy_stdlib.ahoy")
+	// Check in ahoy cache directory (created by ahoy compiler) for .c file first
+	cachedPath := filepath.Join(cacheDir, "ahoy", "ahoy_stdlib.c")
 	if _, err := os.Stat(cachedPath); err == nil {
 		return cachedPath
+	}
+	
+	// Fallback to old .ahoy file for backwards compatibility
+	oldPath := filepath.Join(cacheDir, "ahoy", "ahoy_stdlib.ahoy")
+	if _, err := os.Stat(oldPath); err == nil {
+		return oldPath
 	}
 	
 	return ""
@@ -73,72 +79,135 @@ func loadStdlib() {
 		var currentCategory string
 		var currentDoc strings.Builder
 		
+		// Check if this is a .c file (new format) or .ahoy file (old format)
+		isCFormat := strings.HasSuffix(stdlibPath, ".c")
+		
 		for i, line := range lines {
 			lineNum := i + 1
 			trimmed := strings.TrimSpace(line)
 			
-			// Track category sections
-			if strings.HasPrefix(trimmed, "? ARRAY METHODS") {
+			// Track category sections - handle both formats
+			if strings.Contains(trimmed, "ARRAY METHODS") {
 				currentCategory = "array"
-			} else if strings.HasPrefix(trimmed, "? DICTIONARY METHODS") {
+			} else if strings.Contains(trimmed, "DICTIONARY METHODS") {
 				currentCategory = "dict"
-			} else if strings.HasPrefix(trimmed, "? STRING METHODS") {
+			} else if strings.Contains(trimmed, "STRING METHODS") {
 				currentCategory = "string"
-			} else if strings.HasPrefix(trimmed, "? BUILT-IN FUNCTIONS") {
+			} else if strings.Contains(trimmed, "BUILT-IN FUNCTIONS") {
 				currentCategory = "builtin"
 			}
 			
-			// Collect documentation comments
-			if strings.HasPrefix(trimmed, "?") {
-				currentDoc.WriteString(strings.TrimPrefix(trimmed, "? "))
-				currentDoc.WriteString("\n")
-				continue
-			}
-			
-			// Parse function definitions
-			if strings.HasPrefix(trimmed, "@ ") {
-				// Format: @ method_name |params| return_type:
-				parts := strings.SplitN(trimmed, "|", 3)
-				if len(parts) >= 2 {
-					funcName := strings.TrimSpace(strings.TrimPrefix(parts[0], "@ "))
-					
-					// Extract the actual method name from prefixed names like "array_length"
-					methodName := funcName
-					if strings.HasPrefix(funcName, "array_") {
-						methodName = strings.TrimPrefix(funcName, "array_")
-					} else if strings.HasPrefix(funcName, "dict_") {
-						methodName = strings.TrimPrefix(funcName, "dict_")
-					} else if strings.HasPrefix(funcName, "string_") {
-						methodName = strings.TrimPrefix(funcName, "string_")
-					}
-					
-					params := ""
-					returnType := ""
-					if len(parts) >= 3 {
-						params = parts[1]
-						retPart := parts[2]
-						if idx := strings.Index(retPart, ":"); idx != -1 {
-							returnType = strings.TrimSpace(retPart[:idx])
+			if isCFormat {
+				// Parse C format: * @ function_name |params| return_type:
+				// Collect documentation from * ? comments
+				if strings.HasPrefix(trimmed, "* ?") {
+					docLine := strings.TrimPrefix(trimmed, "* ? ")
+					currentDoc.WriteString(docLine)
+					currentDoc.WriteString("\n")
+					continue
+				}
+				
+				// Parse function definition line in C format
+				if strings.HasPrefix(trimmed, "* @ ") {
+					// Format: * @ method_name |params| return_type:
+					defLine := strings.TrimPrefix(trimmed, "* @ ")
+					parts := strings.SplitN(defLine, "|", 3)
+					if len(parts) >= 2 {
+						funcName := strings.TrimSpace(parts[0])
+						
+						// Extract the actual method name from prefixed names like "array_length"
+						methodName := funcName
+						if strings.HasPrefix(funcName, "array_") {
+							methodName = strings.TrimPrefix(funcName, "array_")
+						} else if strings.HasPrefix(funcName, "dict_") {
+							methodName = strings.TrimPrefix(funcName, "dict_")
+						} else if strings.HasPrefix(funcName, "string_") {
+							methodName = strings.TrimPrefix(funcName, "string_")
 						}
+						
+						params := ""
+						returnType := ""
+						if len(parts) >= 3 {
+							params = parts[1]
+							retPart := parts[2]
+							if idx := strings.Index(retPart, ":"); idx != -1 {
+								returnType = strings.TrimSpace(retPart[:idx])
+							}
+						}
+						
+						// Store with both full name and method name
+						method := StdlibMethod{
+							Name:       methodName,
+							Category:   currentCategory,
+							Line:       lineNum,
+							ReturnType: returnType,
+							Params:     params,
+							Doc:        currentDoc.String(),
+						}
+						stdlibMethods[funcName] = method
+						// Also store by just method name for easier lookup
+						if methodName != funcName {
+							key := currentCategory + "." + methodName
+							stdlibMethods[key] = method
+						}
+						
+						currentDoc.Reset()
 					}
-					
-					// Store with both full name and method name
-					method := StdlibMethod{
-						Name:       methodName,
-						Category:   currentCategory,
-						Line:       lineNum,
-						ReturnType: returnType,
-						Params:     params,
-						Doc:        currentDoc.String(),
+				}
+			} else {
+				// Old .ahoy format parsing
+				// Collect documentation comments
+				if strings.HasPrefix(trimmed, "?") {
+					currentDoc.WriteString(strings.TrimPrefix(trimmed, "? "))
+					currentDoc.WriteString("\n")
+					continue
+				}
+				
+				// Parse function definitions
+				if strings.HasPrefix(trimmed, "@ ") {
+					// Format: @ method_name |params| return_type:
+					parts := strings.SplitN(trimmed, "|", 3)
+					if len(parts) >= 2 {
+						funcName := strings.TrimSpace(strings.TrimPrefix(parts[0], "@ "))
+						
+						// Extract the actual method name from prefixed names like "array_length"
+						methodName := funcName
+						if strings.HasPrefix(funcName, "array_") {
+							methodName = strings.TrimPrefix(funcName, "array_")
+						} else if strings.HasPrefix(funcName, "dict_") {
+							methodName = strings.TrimPrefix(funcName, "dict_")
+						} else if strings.HasPrefix(funcName, "string_") {
+							methodName = strings.TrimPrefix(funcName, "string_")
+						}
+						
+						params := ""
+						returnType := ""
+						if len(parts) >= 3 {
+							params = parts[1]
+							retPart := parts[2]
+							if idx := strings.Index(retPart, ":"); idx != -1 {
+								returnType = strings.TrimSpace(retPart[:idx])
+							}
+						}
+						
+						// Store with both full name and method name
+						method := StdlibMethod{
+							Name:       methodName,
+							Category:   currentCategory,
+							Line:       lineNum,
+							ReturnType: returnType,
+							Params:     params,
+							Doc:        currentDoc.String(),
+						}
+						stdlibMethods[funcName] = method
+						// Also store by just method name for easier lookup
+						if methodName != funcName {
+							key := currentCategory + "." + methodName
+							stdlibMethods[key] = method
+						}
+						
+						currentDoc.Reset()
 					}
-					stdlibMethods[funcName] = method
-					// Also store by just method name for easier lookup
-					if methodName != funcName {
-						key := currentCategory + "." + methodName
-						stdlibMethods[key] = method
-					}
-					
-					currentDoc.Reset()
 				}
 			}
 		}

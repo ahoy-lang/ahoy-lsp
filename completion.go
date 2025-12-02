@@ -306,14 +306,14 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 					return reply(ctx, protocol.CompletionList{IsIncomplete: false, Items: items}, nil)
 				}
 
-				// Check if it's an array type for array methods
-				if sym.Type == "array" {
+				// Check if it's an array type for array methods (including typed arrays like array[string])
+				if sym.Type == "array" || strings.HasPrefix(sym.Type, "array[") || strings.HasPrefix(sym.Type, "array<") {
 					items = addArrayMethods(items, prefix)
 					return reply(ctx, protocol.CompletionList{IsIncomplete: false, Items: items}, nil)
 				}
 
-				// Check if it's a dict type for dictionary methods
-				if sym.Type == "dict" {
+				// Check if it's a dict type for dictionary methods (including typed dicts like dict<string,string>)
+				if sym.Type == "dict" || strings.HasPrefix(sym.Type, "dict<") || strings.HasPrefix(sym.Type, "dict[") {
 					items = addDictMethods(items, prefix)
 					return reply(ctx, protocol.CompletionList{IsIncomplete: false, Items: items}, nil)
 				}
