@@ -368,10 +368,14 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 					fields := symbolTable.GetStructFields(sym.Type)
 
 					if fields != nil && len(fields) > 0 {
-						// Add struct field completions (exclude static fields - they must be accessed via StructType.#field)
+						// Add struct field completions (exclude static fields and nested types - they must be accessed via StructType.#field or StructType.NestedType)
 						for fieldName, field := range fields {
 							// Skip static fields when completing on an instance variable
 							if field.IsStatic {
+								continue
+							}
+							// Skip nested types (they are accessed on the struct type, not instances)
+							if field.Fields != nil && len(field.Fields) > 0 {
 								continue
 							}
 							if prefix == "" || strings.HasPrefix(fieldName, prefix) {
@@ -392,12 +396,12 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 					}
 				}
 
-				// Check if it's a struct type name (for static field access: StructType.#field)
+				// Check if it's a struct type name (for static field access: StructType.#field and nested types)
 				if sym.Kind == SymbolKindStruct {
-					// Show static fields with # prefix
+					// Show static fields with # prefix and nested types
 					if sym.Fields != nil && len(sym.Fields) > 0 {
 						for fieldName, field := range sym.Fields {
-							// Only show static fields for struct type completions
+							// Show static fields for struct type completions
 							if field.IsStatic {
 								staticFieldName := "#" + fieldName
 								if prefix == "" || strings.HasPrefix(staticFieldName, prefix) || strings.HasPrefix(fieldName, prefix) {
@@ -409,9 +413,19 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 									})
 								}
 							}
+							// Show nested types (fields that have their own fields are nested types)
+							if field.Fields != nil && len(field.Fields) > 0 {
+								if prefix == "" || strings.HasPrefix(fieldName, prefix) {
+									items = append(items, protocol.CompletionItem{
+										Label:  fieldName,
+										Kind:   protocol.CompletionItemKindStruct,
+										Detail: fmt.Sprintf("type %s.%s", sym.Name, fieldName),
+									})
+								}
+							}
 						}
 
-						// Return with static field completions
+						// Return with static field and nested type completions
 						result := protocol.CompletionList{
 							IsIncomplete: false,
 							Items:        items,

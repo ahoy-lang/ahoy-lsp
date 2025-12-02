@@ -10,15 +10,16 @@ import (
 
 // Symbol represents a symbol in the code (variable, function, type, etc.)
 type Symbol struct {
-	Name       string
-	Kind       SymbolKind
-	Type       string
-	Line       int
-	Column     int
-	EndLine    int
-	EndColumn  int
-	Fields     map[string]*StructField // For struct types, stores fields and nested types
-	Parameters []ParameterInfo         // For functions, stores parameter information
+	Name        string
+	Kind        SymbolKind
+	Type        string
+	Line        int
+	Column      int
+	EndLine     int
+	EndColumn   int
+	Fields      map[string]*StructField // For struct types, stores fields and nested types
+	FieldOrder  []string                // Ordered list of field names for consistent display
+	Parameters  []ParameterInfo         // For functions, stores parameter information
 	// Don't store Definition node or Scope to prevent memory leaks - AST can't be GC'd
 }
 
@@ -27,6 +28,7 @@ type StructField struct {
 	Name         string
 	Type         string
 	Fields       map[string]*StructField // For nested types
+	FieldOrder   []string                // Ordered list of field names for nested types
 	DefaultValue string                  // String representation of default value
 	IsStatic     bool                    // Static field (shared across instances)
 	IsConst      bool                    // Const field (SCREAMING_SNAKE_CASE - immutable)
@@ -711,6 +713,7 @@ func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
 					IsStatic:     child.IsStatic,
 					IsConst:      child.IsConst,
 				}
+				symbol.FieldOrder = append(symbol.FieldOrder, fieldName)
 			} else if child.Type == ahoy.NODE_TYPE {
 				// Nested type (e.g., "type smoke_particle:")
 				typeName := child.Value
@@ -734,18 +737,29 @@ func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
 							IsStatic:     nestedChild.IsStatic,
 							IsConst:      nestedChild.IsConst,
 						}
+						nestedField.FieldOrder = append(nestedField.FieldOrder, nestedChild.Value)
 					}
 				}
 
 				// Store the nested type as a field
 				symbol.Fields[typeName] = nestedField
+				symbol.FieldOrder = append(symbol.FieldOrder, typeName)
 
 				// Also create a separate symbol for the nested type
 				// First, copy parent struct's non-nested fields for inheritance
 				inheritedFields := make(map[string]*StructField)
+				var inheritedOrder []string
+				
+				// Track which fields the nested type overrides
+				nestedFieldSet := make(map[string]bool)
+				for _, nestedFieldName := range nestedField.FieldOrder {
+					nestedFieldSet[nestedFieldName] = true
+				}
+				
+				// Add parent fields that are NOT overridden by nested type
 				for parentFieldName, parentField := range symbol.Fields {
-					if parentField.Fields == nil {
-						// Copy regular field from parent
+					if parentField.Fields == nil && !nestedFieldSet[parentFieldName] {
+						// Copy regular field from parent (not overridden)
 						inheritedFields[parentFieldName] = &StructField{
 							Name:         parentField.Name,
 							Type:         parentField.Type,
@@ -753,31 +767,35 @@ func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
 							IsStatic:     parentField.IsStatic,
 							IsConst:      parentField.IsConst,
 						}
+						inheritedOrder = append(inheritedOrder, parentFieldName)
 					}
 				}
-				// Add nested type's own fields
+				// Add nested type's own fields (these may override parent fields)
 				for nestedFieldName, nestedFieldObj := range nestedField.Fields {
 					inheritedFields[nestedFieldName] = nestedFieldObj
 				}
+				inheritedOrder = append(inheritedOrder, nestedField.FieldOrder...)
 				
 				nestedSymbol := &Symbol{
-					Name:   structName + "." + typeName,
-					Kind:   SymbolKindStruct,
-					Type:   "struct",
-					Line:   child.Line,
-					Column: 0,
-					Fields: inheritedFields,
+					Name:       structName + "." + typeName,
+					Kind:       SymbolKindStruct,
+					Type:       "struct",
+					Line:       child.Line,
+					Column:     0,
+					Fields:     inheritedFields,
+					FieldOrder: inheritedOrder,
 				}
 				st.AddSymbol(nestedSymbol)
 				
 				// ALSO add symbol with just the nested type name for easier lookup
 				nestedSymbolShort := &Symbol{
-					Name:   typeName,
-					Kind:   SymbolKindStruct,
-					Type:   "struct",
-					Line:   child.Line,
-					Column: 0,
-					Fields: inheritedFields,
+					Name:       typeName,
+					Kind:       SymbolKindStruct,
+					Type:       "struct",
+					Line:       child.Line,
+					Column:     0,
+					Fields:     inheritedFields,
+					FieldOrder: inheritedOrder,
 				}
 				st.AddSymbol(nestedSymbolShort)
 			}

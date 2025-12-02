@@ -387,11 +387,51 @@ func buildHoverText(symbol *Symbol) string {
 	case SymbolKindStruct:
 		text = fmt.Sprintf("```ahoy\nstruct %s:\n", symbol.Name)
 		if len(symbol.Fields) > 0 {
-			for fieldName, field := range symbol.Fields {
+			// Use FieldOrder if available, otherwise fall back to map iteration
+			fieldNames := symbol.FieldOrder
+			if len(fieldNames) == 0 {
+				for fieldName := range symbol.Fields {
+					fieldNames = append(fieldNames, fieldName)
+				}
+			}
+			// Deduplicate field names while preserving order
+			seen := make(map[string]bool)
+			dedupedNames := make([]string, 0, len(fieldNames))
+			for _, name := range fieldNames {
+				if !seen[name] {
+					seen[name] = true
+					dedupedNames = append(dedupedNames, name)
+				}
+			}
+			for _, fieldName := range dedupedNames {
+				field := symbol.Fields[fieldName]
+				if field == nil {
+					continue
+				}
 				if len(field.Fields) > 0 {
 					// Nested type
 					text += fmt.Sprintf("  type %s:\n", fieldName)
-					for nestedFieldName, nestedField := range field.Fields {
+					// Use FieldOrder for nested type too
+					nestedNames := field.FieldOrder
+					if len(nestedNames) == 0 {
+						for nestedFieldName := range field.Fields {
+							nestedNames = append(nestedNames, nestedFieldName)
+						}
+					}
+					// Deduplicate nested field names
+					nestedSeen := make(map[string]bool)
+					dedupedNestedNames := make([]string, 0, len(nestedNames))
+					for _, name := range nestedNames {
+						if !nestedSeen[name] {
+							nestedSeen[name] = true
+							dedupedNestedNames = append(dedupedNestedNames, name)
+						}
+					}
+					for _, nestedFieldName := range dedupedNestedNames {
+						nestedField := field.Fields[nestedFieldName]
+						if nestedField == nil {
+							continue
+						}
 						text += fmt.Sprintf("    %s: %s", nestedFieldName, nestedField.Type)
 						if nestedField.DefaultValue != "" {
 							text += fmt.Sprintf(" = %s", nestedField.DefaultValue)

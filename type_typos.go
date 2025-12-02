@@ -49,9 +49,11 @@ func checkTypeTypos(doc *Document) []protocol.Diagnostic {
 			for _, child := range node.Children {
 				// Nested types are NODE_TYPE (not NODE_STRUCT_DECLARATION)
 				if child.Type == ahoy.NODE_TYPE {
-					// Nested type: parent:child
-					nestedName := structName + ":" + child.Value
-					validTypes[nestedName] = true
+					// Nested type: parent:child and parent.child (both syntaxes)
+					nestedNameColon := structName + ":" + child.Value
+					nestedNameDot := structName + "." + child.Value
+					validTypes[nestedNameColon] = true
+					validTypes[nestedNameDot] = true
 					validTypes[child.Value] = true
 				}
 			}

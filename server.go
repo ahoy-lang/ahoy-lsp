@@ -400,6 +400,12 @@ func (s *Server) handleDidChange(ctx context.Context, reply jsonrpc2.Replier, re
 			doc.SymbolTable.Doc = doc // Set document reference
 			// Extract C header imports
 			doc.CHeaders, doc.CHeaderGlobal = extractCHeaderInfoWithURI(doc.AST, doc.URI)
+			
+			// Reload package files if program name changed or to refresh symbols
+			doc.ProgramName = extractProgramName(doc.AST)
+			if doc.ProgramName != "" {
+				s.loadPackageFiles(doc)
+			}
 		} else {
 			doc.SymbolTable = NewSymbolTable()
 			doc.CHeaders = make(map[string]*ahoy.CHeaderInfo)
