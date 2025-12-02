@@ -28,6 +28,8 @@ type StructField struct {
 	Type         string
 	Fields       map[string]*StructField // For nested types
 	DefaultValue string                  // String representation of default value
+	IsStatic     bool                    // Static field (shared across instances)
+	IsConst      bool                    // Const field (SCREAMING_SNAKE_CASE - immutable)
 }
 
 type SymbolKind int
@@ -706,6 +708,8 @@ func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
 					Name:         fieldName,
 					Type:         fieldType,
 					DefaultValue: defaultVal,
+					IsStatic:     child.IsStatic,
+					IsConst:      child.IsConst,
 				}
 			} else if child.Type == ahoy.NODE_TYPE {
 				// Nested type (e.g., "type smoke_particle:")
@@ -727,6 +731,8 @@ func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
 							Name:         nestedChild.Value,
 							Type:         nestedChild.DataType,
 							DefaultValue: defaultVal,
+							IsStatic:     nestedChild.IsStatic,
+							IsConst:      nestedChild.IsConst,
 						}
 					}
 				}
@@ -744,6 +750,8 @@ func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
 							Name:         parentField.Name,
 							Type:         parentField.Type,
 							DefaultValue: parentField.DefaultValue,
+							IsStatic:     parentField.IsStatic,
+							IsConst:      parentField.IsConst,
 						}
 					}
 				}

@@ -368,8 +368,12 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 					fields := symbolTable.GetStructFields(sym.Type)
 
 					if fields != nil && len(fields) > 0 {
-						// Add struct field completions
+						// Add struct field completions (exclude static fields - they must be accessed via StructType.#field)
 						for fieldName, field := range fields {
+							// Skip static fields when completing on an instance variable
+							if field.IsStatic {
+								continue
+							}
 							if prefix == "" || strings.HasPrefix(fieldName, prefix) {
 								items = append(items, protocol.CompletionItem{
 									Label:  fieldName,
@@ -380,6 +384,34 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 						}
 
 						// Return early with struct field completions
+						result := protocol.CompletionList{
+							IsIncomplete: false,
+							Items:        items,
+						}
+						return reply(ctx, result, nil)
+					}
+				}
+
+				// Check if it's a struct type name (for static field access: StructType.#field)
+				if sym.Kind == SymbolKindStruct {
+					// Show static fields with # prefix
+					if sym.Fields != nil && len(sym.Fields) > 0 {
+						for fieldName, field := range sym.Fields {
+							// Only show static fields for struct type completions
+							if field.IsStatic {
+								staticFieldName := "#" + fieldName
+								if prefix == "" || strings.HasPrefix(staticFieldName, prefix) || strings.HasPrefix(fieldName, prefix) {
+									detailText := fmt.Sprintf("static %s", field.Type)
+									items = append(items, protocol.CompletionItem{
+										Label:  staticFieldName,
+										Kind:   protocol.CompletionItemKindField,
+										Detail: detailText,
+									})
+								}
+							}
+						}
+
+						// Return with static field completions
 						result := protocol.CompletionList{
 							IsIncomplete: false,
 							Items:        items,
