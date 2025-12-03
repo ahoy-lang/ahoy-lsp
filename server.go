@@ -268,6 +268,7 @@ func (s *Server) handleDidOpen(ctx context.Context, reply jsonrpc2.Replier, req 
 			Functions: make(map[string]*ahoy.CFunction),
 			Enums:     make(map[string]*ahoy.CEnum),
 			Defines:   make(map[string]*ahoy.CDefine),
+			Typedefs:  make(map[string]string),
 		}
 	}
 
@@ -413,6 +414,7 @@ func (s *Server) handleDidChange(ctx context.Context, reply jsonrpc2.Replier, re
 				Functions: make(map[string]*ahoy.CFunction),
 				Enums:     make(map[string]*ahoy.CEnum),
 				Defines:   make(map[string]*ahoy.CDefine),
+				Typedefs:  make(map[string]string),
 			}
 		}
 	}
@@ -483,6 +485,7 @@ func extractCHeaderInfoWithURI(ast *ahoy.ASTNode, docURI uri.URI) (map[string]*a
 		Enums:     make(map[string]*ahoy.CEnum),
 		Defines:   make(map[string]*ahoy.CDefine),
 		Structs:   make(map[string]*ahoy.CStruct),
+		Typedefs:  make(map[string]string),
 	}
 
 	if ast == nil {
