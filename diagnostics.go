@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"ahoy"
@@ -104,22 +105,30 @@ func (s *Server) publishDiagnostics(ctx context.Context, doc *Document) {
 			// Check object literal property assignment
 			objectPropDiags := checkObjectPropertyAssignment(doc)
 			diagnostics = append(diagnostics, objectPropDiags...)
-			
+
 			// Check for wrong access syntax (array vs dict vs object)
 			accessSyntaxDiags := checkAccessSyntax(doc)
 			diagnostics = append(diagnostics, accessSyntaxDiags...)
-			
+
 			// Check for invalid binary operations (string + number, etc.)
 			binaryOpDiags := checkBinaryOperationTypes(doc)
 			diagnostics = append(diagnostics, binaryOpDiags...)
-			
+
 			// Check for unhandled multi-return function calls
 			unhandledReturnDiags := checkUnhandledMultiReturns(doc)
 			diagnostics = append(diagnostics, unhandledReturnDiags...)
-			
+
 			// Check for missing = between typed collections and their values
 			missingEqualsDiags := checkMissingEqualsInTypedCollections(doc)
 			diagnostics = append(diagnostics, missingEqualsDiags...)
+
+			// Check for global scope variables in programs
+			globalVarDiags := checkGlobalScopeVariables(doc)
+			diagnostics = append(diagnostics, globalVarDiags...)
+
+			// Check for duplicate const declarations across program files
+			duplicateConstDiags := checkDuplicateConsts(doc)
+			diagnostics = append(diagnostics, duplicateConstDiags...)
 		}
 	}
 
@@ -640,7 +649,7 @@ func checkInvalidMethodCalls(doc *Document) []protocol.Diagnostic {
 				} else if strings.HasPrefix(targetType, "dict<") || strings.HasPrefix(targetType, "dict[") {
 					baseTargetType = "dict"
 				}
-				
+
 				switch baseTargetType {
 				case "string":
 					validMethods = getValidStringMethods()
@@ -1231,6 +1240,8 @@ var builtinFunctions = []string{
 	"float",
 	"char",
 	"string",
+	"len",
+	"length",
 	"read_json",
 	"write_json",
 	"ahoy_json_string",
@@ -1511,7 +1522,7 @@ func checkUndeclaredIdentifiers(doc *Document) []protocol.Diagnostic {
 			if len(identifierName) > 0 && identifierName[0] == '.' {
 				// Extract the member name without the dot
 				memberName := identifierName[1:]
-				
+
 				// Search all enum symbols to find this member
 				foundEnumMember := false
 				for _, symbol := range symbolTable.GlobalScope.Symbols {
@@ -1523,7 +1534,7 @@ func checkUndeclaredIdentifiers(doc *Document) []protocol.Diagnostic {
 						}
 					}
 				}
-				
+
 				// If found as enum member, skip validation (it's valid)
 				if foundEnumMember {
 					return
@@ -1803,7 +1814,7 @@ func checkUndeclaredIdentifiers(doc *Document) []protocol.Diagnostic {
 				for i := len(scopeStack) - 1; i >= 0 && sym == nil; i-- {
 					sym = scopeStack[i].scope.Lookup(varName)
 				}
-				
+
 				if sym == nil {
 					// Variable not found - try to find a similar name
 					availableIdentifiers := []string{}
@@ -1820,12 +1831,12 @@ func checkUndeclaredIdentifiers(doc *Document) []protocol.Diagnostic {
 							}
 						}
 					}
-					
+
 					// Find best match using Levenshtein distance
 					message := varName + " not found"
 					bestMatch := ""
 					bestDistance := 1000000
-					
+
 					for _, name := range availableIdentifiers {
 						distance := levenshteinDistance(varName, name)
 						if distance < bestDistance {
@@ -1833,17 +1844,17 @@ func checkUndeclaredIdentifiers(doc *Document) []protocol.Diagnostic {
 							bestMatch = name
 						}
 					}
-					
+
 					// Suggest similar identifier if distance is reasonable
 					threshold := 3
 					if len(varName) > 7 {
 						threshold = (len(varName) * 2) / 5
 					}
-					
+
 					if bestDistance <= threshold && bestMatch != "" {
 						message += ", did you mean " + bestMatch + "?"
 					}
-					
+
 					lineText := ""
 					if node.Line > 0 && node.Line <= len(doc.Lines) {
 						lineText = doc.Lines[node.Line-1]
@@ -1852,7 +1863,7 @@ func checkUndeclaredIdentifiers(doc *Document) []protocol.Diagnostic {
 					if endChar == 0 {
 						endChar = uint32(len(varName) + 10)
 					}
-					
+
 					diagnostic := protocol.Diagnostic{
 						Range: protocol.Range{
 							Start: protocol.Position{
@@ -3198,7 +3209,7 @@ func checkRedundantDeferFrees(doc *Document) []protocol.Diagnostic {
 							funcSym := symbolTable.GlobalScope.Lookup(funcName)
 							if funcSym != nil && funcSym.Kind == SymbolKindFunction {
 								returnType := funcSym.Type
-								
+
 								// If return type is "infer", try to infer it
 								if returnType == "infer" || returnType == "" || returnType == "generic" || returnType == "any" {
 									// Find the function node and infer from its body
@@ -3221,7 +3232,7 @@ func checkRedundantDeferFrees(doc *Document) []protocol.Diagnostic {
 									if doc.AST != nil {
 										findFunc(doc.AST)
 									}
-									
+
 									// Infer return types from function body
 									if funcNode != nil {
 										inferredTypes := inferFunctionReturnTypes(funcNode, []string{}, doc)
@@ -3230,7 +3241,7 @@ func checkRedundantDeferFrees(doc *Document) []protocol.Diagnostic {
 										}
 									}
 								}
-								
+
 								// Check if return type is heap-allocated
 								if strings.HasPrefix(returnType, "array") ||
 									strings.HasPrefix(returnType, "dict") ||
@@ -3249,19 +3260,19 @@ func checkRedundantDeferFrees(doc *Document) []protocol.Diagnostic {
 				if n.Type == ahoy.NODE_TUPLE_ASSIGNMENT && len(n.Children) >= 2 {
 					leftSide := n.Children[0]
 					rightSide := n.Children[1]
-					
+
 					// Check if right side is a function call
 					if len(rightSide.Children) > 0 && rightSide.Children[0].Type == ahoy.NODE_CALL {
 						callNode := rightSide.Children[0]
 						funcName := callNode.Value
-						
+
 						// Look up function return types
 						symbolTable := getSymbolTable(doc)
 						if symbolTable != nil {
 							funcSym := symbolTable.GlobalScope.Lookup(funcName)
 							if funcSym != nil && funcSym.Kind == SymbolKindFunction {
 								returnTypeStr := funcSym.Type
-								
+
 								// If return type is "infer", try to infer it
 								if returnTypeStr == "infer" || returnTypeStr == "" || returnTypeStr == "generic" || returnTypeStr == "any" {
 									// Find the function node and infer from its body
@@ -3284,7 +3295,7 @@ func checkRedundantDeferFrees(doc *Document) []protocol.Diagnostic {
 									if doc.AST != nil {
 										findFunc(doc.AST)
 									}
-									
+
 									// Infer return types from function body
 									if funcNode != nil {
 										// Build argument types from the call
@@ -3293,24 +3304,24 @@ func checkRedundantDeferFrees(doc *Document) []protocol.Diagnostic {
 											argType := inferExpressionType(arg, doc)
 											argTypes = append(argTypes, argType)
 										}
-										
+
 										inferredTypes := inferFunctionReturnTypes(funcNode, argTypes, doc)
 										if len(inferredTypes) > 0 {
 											returnTypeStr = strings.Join(inferredTypes, ",")
 										}
 									}
 								}
-								
+
 								// Check if any return type is heap-allocated
 								if returnTypeStr != "" && returnTypeStr != "void" {
 									returnTypes := strings.Split(returnTypeStr, ",")
-									
+
 									// Mark each variable with its corresponding return type
 									for i, leftChild := range leftSide.Children {
 										if leftChild.Type == ahoy.NODE_IDENTIFIER && i < len(returnTypes) {
 											varName := leftChild.Value
 											returnType := strings.TrimSpace(returnTypes[i])
-											
+
 											// Check if this is a heap-allocated type
 											if strings.HasPrefix(returnType, "array") ||
 												strings.HasPrefix(returnType, "dict") ||
@@ -3448,7 +3459,7 @@ func checkInvalidFreeOperations(doc *Document) []protocol.Diagnostic {
 
 			// Track variable types (heap vs stack allocated)
 			varTypes := make(map[string]string)
-			
+
 			// Find all variable declarations
 			var findVars func(*ahoy.ASTNode)
 			findVars = func(n *ahoy.ASTNode) {
@@ -3584,85 +3595,204 @@ func checkInvalidFreeOperations(doc *Document) []protocol.Diagnostic {
 // checkMissingEqualsInTypedCollections checks for missing = between typed collections and their values
 // e.g., words:array[string] ["hello"] should be words:array[string]= ["hello"]
 func checkMissingEqualsInTypedCollections(doc *Document) []protocol.Diagnostic {
-diagnostics := []protocol.Diagnostic{}
+	diagnostics := []protocol.Diagnostic{}
 
-if doc.Lines == nil {
-return diagnostics
-}
+	if doc.Lines == nil {
+		return diagnostics
+	}
 
-// Regex patterns to find typed collections followed by literals without =
-// Pattern: array[type] [ or dict<type,type> <
-for lineNum, line := range doc.Lines {
-trimmed := strings.TrimSpace(line)
-if trimmed == "" || strings.HasPrefix(trimmed, "?") {
-continue
-}
+	// Regex patterns to find typed collections followed by literals without =
+	// Pattern: array[type] [ or dict<type,type> <
+	for lineNum, line := range doc.Lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "?") {
+			continue
+		}
 
-// Check for array[type] [ (missing =)
-// Pattern: :array[something] [
-arrayTypeIdx := strings.Index(line, "array[")
-if arrayTypeIdx != -1 {
-// Find the closing ]
-closeIdx := findMatchingBracket(line, arrayTypeIdx+5, '[', ']')
-if closeIdx != -1 && closeIdx+1 < len(line) {
-afterType := strings.TrimSpace(line[closeIdx+1:])
-// Check if immediately followed by [ without =
-if strings.HasPrefix(afterType, "[") {
-diagnostic := protocol.Diagnostic{
-Range: protocol.Range{
-Start: protocol.Position{Line: uint32(lineNum), Character: uint32(closeIdx + 1)},
-End:   protocol.Position{Line: uint32(lineNum), Character: uint32(closeIdx + 2)},
-},
-Severity: protocol.DiagnosticSeverityWarning,
-Source:   "ahoy",
-Message:  "Missing '=' between array type and value literal. Use: array[type]= [values]",
-Code:     "missing-equals",
-}
-diagnostics = append(diagnostics, diagnostic)
-}
-}
-}
+		// Check for array[type] [ (missing =)
+		// Pattern: :array[something] [
+		arrayTypeIdx := strings.Index(line, "array[")
+		if arrayTypeIdx != -1 {
+			// Find the closing ]
+			closeIdx := findMatchingBracket(line, arrayTypeIdx+5, '[', ']')
+			if closeIdx != -1 && closeIdx+1 < len(line) {
+				afterType := strings.TrimSpace(line[closeIdx+1:])
+				// Check if immediately followed by [ without =
+				if strings.HasPrefix(afterType, "[") {
+					diagnostic := protocol.Diagnostic{
+						Range: protocol.Range{
+							Start: protocol.Position{Line: uint32(lineNum), Character: uint32(closeIdx + 1)},
+							End:   protocol.Position{Line: uint32(lineNum), Character: uint32(closeIdx + 2)},
+						},
+						Severity: protocol.DiagnosticSeverityWarning,
+						Source:   "ahoy",
+						Message:  "Missing '=' between array type and value literal. Use: array[type]= [values]",
+						Code:     "missing-equals",
+					}
+					diagnostics = append(diagnostics, diagnostic)
+				}
+			}
+		}
 
-// Check for dict<type,type> < (missing =)
-dictTypeIdx := strings.Index(line, "dict<")
-if dictTypeIdx != -1 {
-// Find the closing >
-closeIdx := findMatchingBracket(line, dictTypeIdx+4, '<', '>')
-if closeIdx != -1 && closeIdx+1 < len(line) {
-afterType := strings.TrimSpace(line[closeIdx+1:])
-// Check if immediately followed by < without =
-if strings.HasPrefix(afterType, "<") {
-diagnostic := protocol.Diagnostic{
-Range: protocol.Range{
-Start: protocol.Position{Line: uint32(lineNum), Character: uint32(closeIdx + 1)},
-End:   protocol.Position{Line: uint32(lineNum), Character: uint32(closeIdx + 2)},
-},
-Severity: protocol.DiagnosticSeverityWarning,
-Source:   "ahoy",
-Message:  "Missing '=' between dict type and value literal. Use: dict<key,value>= <values>",
-Code:     "missing-equals",
-}
-diagnostics = append(diagnostics, diagnostic)
-}
-}
-}
-}
+		// Check for dict<type,type> < (missing =)
+		dictTypeIdx := strings.Index(line, "dict<")
+		if dictTypeIdx != -1 {
+			// Find the closing >
+			closeIdx := findMatchingBracket(line, dictTypeIdx+4, '<', '>')
+			if closeIdx != -1 && closeIdx+1 < len(line) {
+				afterType := strings.TrimSpace(line[closeIdx+1:])
+				// Check if immediately followed by < without =
+				if strings.HasPrefix(afterType, "<") {
+					diagnostic := protocol.Diagnostic{
+						Range: protocol.Range{
+							Start: protocol.Position{Line: uint32(lineNum), Character: uint32(closeIdx + 1)},
+							End:   protocol.Position{Line: uint32(lineNum), Character: uint32(closeIdx + 2)},
+						},
+						Severity: protocol.DiagnosticSeverityWarning,
+						Source:   "ahoy",
+						Message:  "Missing '=' between dict type and value literal. Use: dict<key,value>= <values>",
+						Code:     "missing-equals",
+					}
+					diagnostics = append(diagnostics, diagnostic)
+				}
+			}
+		}
+	}
 
-return diagnostics
+	return diagnostics
 }
 
 // findMatchingBracket finds the index of the closing bracket that matches the opening bracket
 func findMatchingBracket(line string, startIdx int, open byte, close byte) int {
-depth := 1
-for i := startIdx + 1; i < len(line); i++ {
-if line[i] == open {
-depth++
-} else if line[i] == close {
-depth--
-if depth == 0 {
-return i
+	depth := 1
+	for i := startIdx + 1; i < len(line); i++ {
+		if line[i] == open {
+			depth++
+		} else if line[i] == close {
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+	return -1
 }
+
+// checkGlobalScopeVariables checks for variables declared in global scope when there's a program declaration
+func checkGlobalScopeVariables(doc *Document) []protocol.Diagnostic {
+	diagnostics := []protocol.Diagnostic{}
+
+	if doc.AST == nil {
+		return diagnostics
+	}
+
+	// Check if there's a program declaration
+	var hasProgram bool
+	for _, child := range doc.AST.Children {
+		if child.Type == ahoy.NODE_PROGRAM_DECLARATION {
+			hasProgram = true
+			break
+		}
+	}
+
+	if !hasProgram {
+		return diagnostics // No program declaration, global variables are allowed
+	}
+
+	// Check for variable declarations at the top level (not inside functions)
+	for _, child := range doc.AST.Children {
+		if child.Type == ahoy.NODE_VARIABLE_DECLARATION && child.IsStatic == false {
+			// This is a variable in global scope in a program - not allowed
+			// Constants (::) are allowed, only variables (:) are not
+			lineText := ""
+			if child.Line > 0 && child.Line <= len(doc.Lines) {
+				lineText = doc.Lines[child.Line-1]
+			}
+			endChar := uint32(len(lineText))
+			if endChar == 0 {
+				endChar = 20
+			}
+
+			diagnostic := protocol.Diagnostic{
+				Range: protocol.Range{
+					Start: protocol.Position{Line: uint32(child.Line - 1), Character: 0},
+					End:   protocol.Position{Line: uint32(child.Line - 1), Character: endChar},
+				},
+				Severity: protocol.DiagnosticSeverityError,
+				Source:   "ahoy",
+				Message:  "variables not allowed in global scope in a program; declare in main function instead",
+				Code:     "global-var-in-program",
+			}
+			diagnostics = append(diagnostics, diagnostic)
+		}
+	}
+
+	return diagnostics
 }
-}
-return -1
+
+// checkDuplicateConsts checks for duplicate const declarations across program files
+func checkDuplicateConsts(doc *Document) []protocol.Diagnostic {
+	diagnostics := []protocol.Diagnostic{}
+
+	if doc.AST == nil || doc.PackageSymbols == nil {
+		return diagnostics
+	}
+
+	// Check if there's a program declaration
+	var programName string
+	for _, child := range doc.AST.Children {
+		if child.Type == ahoy.NODE_PROGRAM_DECLARATION {
+			programName = child.Value
+			break
+		}
+	}
+
+	if programName == "" {
+		return diagnostics // No program, skip duplicate check
+	}
+
+	// Get this file's consts
+	thisFileConsts := make(map[string]*ahoy.ASTNode)
+	for _, child := range doc.AST.Children {
+		if child.Type == ahoy.NODE_CONSTANT_DECLARATION {
+			thisFileConsts[child.Value] = child
+		}
+	}
+
+	// Check against package symbols for duplicates from other files
+	for constName, constNode := range thisFileConsts {
+		if sym, exists := doc.PackageSymbols.GlobalScope.Symbols[constName]; exists {
+			// Check if defined in a different file
+			if sym.File != "" && sym.File != string(doc.URI) {
+				// Extract just filename from path
+				otherFile := sym.File
+				if idx := strings.LastIndex(sym.File, "/"); idx != -1 {
+					otherFile = sym.File[idx+1:]
+				}
+
+				lineText := ""
+				if constNode.Line > 0 && constNode.Line <= len(doc.Lines) {
+					lineText = doc.Lines[constNode.Line-1]
+				}
+				endChar := uint32(len(lineText))
+				if endChar == 0 {
+					endChar = 20
+				}
+
+				diagnostic := protocol.Diagnostic{
+					Range: protocol.Range{
+						Start: protocol.Position{Line: uint32(constNode.Line - 1), Character: 0},
+						End:   protocol.Position{Line: uint32(constNode.Line - 1), Character: endChar},
+					},
+					Severity: protocol.DiagnosticSeverityError,
+					Source:   "ahoy",
+					Message:  fmt.Sprintf("can't redeclare const '%s' already defined in file %s line %d", constName, otherFile, sym.Line),
+					Code:     "duplicate-const",
+				}
+				diagnostics = append(diagnostics, diagnostic)
+			}
+		}
+	}
+
+	return diagnostics
 }

@@ -243,7 +243,7 @@ func (s *Server) handleDidOpen(ctx context.Context, reply jsonrpc2.Replier, req 
 		debugLog.Printf("Return types resolved for %d functions", len(inferredReturnTypes))
 
 		debugLog.Printf("Building symbol table...")
-		doc.SymbolTable = BuildSymbolTable(doc.AST, doc.InferredParams)
+		doc.SymbolTable = BuildSymbolTableWithFile(doc.AST, string(doc.URI), doc.InferredParams)
 		doc.SymbolTable.Doc = doc // Set document reference
 		doc.SymbolTable.InferredReturns = inferredReturnTypes // Store resolved return types
 		debugLog.Printf("Symbol table built")
@@ -268,7 +268,7 @@ func (s *Server) handleDidOpen(ctx context.Context, reply jsonrpc2.Replier, req 
 			Functions: make(map[string]*ahoy.CFunction),
 			Enums:     make(map[string]*ahoy.CEnum),
 			Defines:   make(map[string]*ahoy.CDefine),
-			Typedefs:  make(map[string]string),
+			Typedefs:  make(map[string]*ahoy.CTypedef),
 		}
 	}
 
@@ -397,7 +397,7 @@ func (s *Server) handleDidChange(ctx context.Context, reply jsonrpc2.Replier, re
 		if doc.AST != nil {
 			// Infer parameter types first
 			doc.InferredParams = inferParameterTypes(doc.AST, doc)
-			doc.SymbolTable = BuildSymbolTable(doc.AST, doc.InferredParams)
+			doc.SymbolTable = BuildSymbolTableWithFile(doc.AST, string(doc.URI), doc.InferredParams)
 			doc.SymbolTable.Doc = doc // Set document reference
 			// Extract C header imports
 			doc.CHeaders, doc.CHeaderGlobal = extractCHeaderInfoWithURI(doc.AST, doc.URI)
@@ -414,7 +414,7 @@ func (s *Server) handleDidChange(ctx context.Context, reply jsonrpc2.Replier, re
 				Functions: make(map[string]*ahoy.CFunction),
 				Enums:     make(map[string]*ahoy.CEnum),
 				Defines:   make(map[string]*ahoy.CDefine),
-				Typedefs:  make(map[string]string),
+				Typedefs:  make(map[string]*ahoy.CTypedef),
 			}
 		}
 	}
@@ -485,7 +485,7 @@ func extractCHeaderInfoWithURI(ast *ahoy.ASTNode, docURI uri.URI) (map[string]*a
 		Enums:     make(map[string]*ahoy.CEnum),
 		Defines:   make(map[string]*ahoy.CDefine),
 		Structs:   make(map[string]*ahoy.CStruct),
-		Typedefs:  make(map[string]string),
+		Typedefs:  make(map[string]*ahoy.CTypedef),
 	}
 
 	if ast == nil {
@@ -616,8 +616,8 @@ func (s *Server) loadPackageFiles(doc *Document) {
 			continue
 		}
 
-		// Build symbol table for this file
-		symbols := BuildSymbolTable(ast)
+		// Build symbol table for this file with file path tracking
+		symbols := BuildSymbolTableWithFile(ast, string(fileURI))
 
 		// Add to package files
 		doc.PackageFiles[fileURI] = &PackageFile{

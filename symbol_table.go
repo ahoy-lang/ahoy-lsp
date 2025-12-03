@@ -17,6 +17,7 @@ type Symbol struct {
 	Column      int
 	EndLine     int
 	EndColumn   int
+	File        string                  // Source file path for cross-file tracking
 	Fields      map[string]*StructField // For struct types, stores fields and nested types
 	FieldOrder  []string                // Ordered list of field names for consistent display
 	Parameters  []ParameterInfo         // For functions, stores parameter information
@@ -168,6 +169,7 @@ type SymbolTable struct {
 	Doc             *Document           // Store document for type inference
 	InferredParams  map[string][]string // function name -> inferred parameter types
 	InferredReturns map[string][]string // function name -> inferred return types
+	FilePath        string              // File path this symbol table was built from
 }
 
 func NewSymbolTable() *SymbolTable {
@@ -323,12 +325,18 @@ func (st *SymbolTable) findSymbolInScope(scope *Scope, line, column int) *Symbol
 
 // BuildSymbolTable walks the AST and builds the symbol table
 func BuildSymbolTable(ast *ahoy.ASTNode, inferredParams ...map[string][]string) *SymbolTable {
+	return BuildSymbolTableWithFile(ast, "", inferredParams...)
+}
+
+// BuildSymbolTableWithFile walks the AST and builds the symbol table, tracking file origin
+func BuildSymbolTableWithFile(ast *ahoy.ASTNode, filePath string, inferredParams ...map[string][]string) *SymbolTable {
 	if ast == nil {
 		return NewSymbolTable()
 	}
 
 	st := NewSymbolTable()
 	st.AST = ast // Store AST for lookups
+	st.FilePath = filePath // Store file path for symbols
 	
 	// Store inferred parameter types if provided
 	if len(inferredParams) > 0 {
@@ -817,6 +825,7 @@ func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
 			Type:   constType,
 			Line:   node.Line,
 			Column: 0,
+			File:   st.FilePath,
 		}
 		st.AddSymbol(symbol)
 

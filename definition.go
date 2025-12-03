@@ -398,22 +398,19 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 			}
 		}
 		
-		// Check C typedef aliases - redirect to base type definition
+		// Check C typedef aliases - go to the typedef line itself
 		if doc.CHeaderGlobal.Typedefs != nil {
-			if baseType, isAlias := doc.CHeaderGlobal.Typedefs[word]; isAlias {
-				// Find the base type's struct definition
-				if baseStruct, ok := doc.CHeaderGlobal.Structs[baseType]; ok {
-					if baseStruct.File != "" && baseStruct.Line > 0 {
-						location := protocol.Location{
-							URI: protocol.URI("file://" + baseStruct.File),
-							Range: protocol.Range{
-								Start: protocol.Position{Line: uint32(baseStruct.Line - 1), Character: 0},
-								End:   protocol.Position{Line: uint32(baseStruct.Line - 1), Character: 100},
-							},
-						}
-						debugLog.Printf("Go to definition: C typedef alias %s -> base type %s at %s:%d", word, baseType, baseStruct.File, baseStruct.Line)
-						return reply(ctx, location, nil)
+			if typedef, isAlias := doc.CHeaderGlobal.Typedefs[word]; isAlias {
+				if typedef.File != "" && typedef.Line > 0 {
+					location := protocol.Location{
+						URI: protocol.URI("file://" + typedef.File),
+						Range: protocol.Range{
+							Start: protocol.Position{Line: uint32(typedef.Line - 1), Character: 0},
+							End:   protocol.Position{Line: uint32(typedef.Line - 1), Character: 100},
+						},
 					}
+					debugLog.Printf("Go to definition: C typedef alias %s at %s:%d", word, typedef.File, typedef.Line)
+					return reply(ctx, location, nil)
 				}
 			}
 		}
@@ -505,25 +502,22 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 			}
 		}
 		
-		// Check typedef aliases - redirect to base type definition
+		// Check typedef aliases - go to the typedef line itself
 		if headerInfo.Typedefs != nil {
-			if baseType, isAlias := headerInfo.Typedefs[word]; isAlias {
-				// Find the base type's struct definition
-				if baseStruct, ok := headerInfo.Structs[baseType]; ok {
-					for _, child := range doc.AST.Children {
-						if child.Type == ahoy.NODE_IMPORT_STATEMENT && child.DataType == namespace {
-							resolvedPath := resolveImportPath(child.Value, params.TextDocument.URI)
-							if baseStruct.Line > 0 {
-								location := protocol.Location{
-									URI: protocol.URI("file://" + resolvedPath),
-									Range: protocol.Range{
-										Start: protocol.Position{Line: uint32(baseStruct.Line - 1), Character: 0},
-										End:   protocol.Position{Line: uint32(baseStruct.Line - 1), Character: 100},
-									},
-								}
-								debugLog.Printf("Go to definition: namespaced typedef alias %s -> base type %s at %s:%d", word, baseType, resolvedPath, baseStruct.Line)
-								return reply(ctx, location, nil)
+			if typedef, isAlias := headerInfo.Typedefs[word]; isAlias {
+				for _, child := range doc.AST.Children {
+					if child.Type == ahoy.NODE_IMPORT_STATEMENT && child.DataType == namespace {
+						resolvedPath := resolveImportPath(child.Value, params.TextDocument.URI)
+						if typedef.Line > 0 {
+							location := protocol.Location{
+								URI: protocol.URI("file://" + resolvedPath),
+								Range: protocol.Range{
+									Start: protocol.Position{Line: uint32(typedef.Line - 1), Character: 0},
+									End:   protocol.Position{Line: uint32(typedef.Line - 1), Character: 100},
+								},
 							}
+							debugLog.Printf("Go to definition: namespaced typedef alias %s at %s:%d", word, resolvedPath, typedef.Line)
+							return reply(ctx, location, nil)
 						}
 					}
 				}
