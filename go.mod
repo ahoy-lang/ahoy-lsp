@@ -20,4 +20,4 @@ require (
 )
 
 // Use local ahoy package during development
-replace ahoy => ../ahoy
+replace ahoy => ../ahoy/pkg
