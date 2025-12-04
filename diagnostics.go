@@ -1436,18 +1436,22 @@ func checkUndefinedFunctions(doc *Document) []protocol.Diagnostic {
 func checkUndeclaredIdentifiers(doc *Document) []protocol.Diagnostic {
 	diagnostics := []protocol.Diagnostic{}
 
-	symbolTable := getSymbolTable(doc)
-	if doc.AST == nil || symbolTable == nil {
+	// Use the merged symbol table for global lookups (cross-file symbols)
+	globalSymbolTable := getSymbolTable(doc)
+	// Use the document's own symbol table for scope traversal (preserves function scopes)
+	localSymbolTable := doc.SymbolTable
+	
+	if doc.AST == nil || localSymbolTable == nil {
 		return diagnostics
 	}
 
-	// Track scope stack as we traverse
+	// Track scope stack as we traverse - use local symbol table for proper scope hierarchy
 	type scopeInfo struct {
 		scope      *Scope
 		childIndex int // Which child scope we're currently using
 	}
 
-	scopeStack := []scopeInfo{{scope: symbolTable.GlobalScope, childIndex: 0}}
+	scopeStack := []scopeInfo{{scope: localSymbolTable.GlobalScope, childIndex: 0}}
 	inFunctionScope := false // Track if we're inside a function (not loops/conditionals)
 
 	// Walk the AST looking for identifier usage
@@ -1525,12 +1529,23 @@ func checkUndeclaredIdentifiers(doc *Document) []protocol.Diagnostic {
 
 				// Search all enum symbols to find this member
 				foundEnumMember := false
-				for _, symbol := range symbolTable.GlobalScope.Symbols {
+				for _, symbol := range localSymbolTable.GlobalScope.Symbols {
 					if symbol.Kind == SymbolKindEnum {
 						// Check if this enum has the member
 						if _, exists := symbol.Fields[memberName]; exists {
 							foundEnumMember = true
 							break
+						}
+					}
+				}
+				// Also check global/package symbol table for cross-file enums
+				if !foundEnumMember && globalSymbolTable != nil && globalSymbolTable != localSymbolTable {
+					for _, symbol := range globalSymbolTable.GlobalScope.Symbols {
+						if symbol.Kind == SymbolKindEnum {
+							if _, exists := symbol.Fields[memberName]; exists {
+								foundEnumMember = true
+								break
+							}
 						}
 					}
 				}
@@ -1543,15 +1558,41 @@ func checkUndeclaredIdentifiers(doc *Document) []protocol.Diagnostic {
 			}
 
 			// Look up the identifier in the current scope (searches parent scopes too)
+			// First, look up in the current local scope (function params, local vars)
 			sym := scope.Lookup(identifierName)
+			
+			// If not found locally, also check the global/package symbol table
+			// This handles cross-file symbols in multi-file programs
+			if sym == nil && globalSymbolTable != nil && globalSymbolTable != localSymbolTable {
+				sym = globalSymbolTable.GlobalScope.Lookup(identifierName)
+			}
 
 			// Check if we're accessing a global variable from within a FUNCTION (not loops/conditionals)
 			if sym != nil && inFunctionScope {
-				// Check if the symbol is NOT in the current (non-global) scope
-				localSym := scope.LookupLocal(identifierName)
-				if localSym == nil {
-					// Not found locally, so it might be global
-					globalSym := symbolTable.GlobalScope.LookupLocal(identifierName)
+				// Check if the symbol is in the current scope chain (function scope or nested scopes)
+				// We need to check if the symbol is LOCAL to the function (not global)
+				foundInFunctionScope := false
+				
+				// Walk up the scope stack to see if it's defined in any function-local scope
+				for i := len(scopeStack) - 1; i >= 0; i-- {
+					scopeToCheck := scopeStack[i].scope
+					// Stop before reaching global scope
+					if scopeToCheck.Parent == nil {
+						break
+					}
+					if scopeToCheck.LookupLocal(identifierName) != nil {
+						foundInFunctionScope = true
+						break
+					}
+				}
+				
+				// If not found in any function-local scope, check if it's a global variable
+				if !foundInFunctionScope {
+					// Check if it's in the global scope
+					globalSym := localSymbolTable.GlobalScope.LookupLocal(identifierName)
+					if globalSym == nil && globalSymbolTable != nil {
+						globalSym = globalSymbolTable.GlobalScope.LookupLocal(identifierName)
+					}
 					if globalSym != nil {
 						// It's a global symbol - check if it's a variable (not a constant or function)
 						if globalSym.Kind == SymbolKindVariable {
@@ -1625,9 +1666,17 @@ func checkUndeclaredIdentifiers(doc *Document) []protocol.Diagnostic {
 
 				// Collect all available identifiers for typo detection
 				availableIdentifiers := []string{}
-				for _, s := range symbolTable.GlobalScope.Symbols {
+				for _, s := range localSymbolTable.GlobalScope.Symbols {
 					if s.Kind == SymbolKindVariable || s.Kind == SymbolKindConstant || s.Kind == SymbolKindParameter {
 						availableIdentifiers = append(availableIdentifiers, s.Name)
+					}
+				}
+				// Also check global/package symbols
+				if globalSymbolTable != nil && globalSymbolTable != localSymbolTable {
+					for _, s := range globalSymbolTable.GlobalScope.Symbols {
+						if s.Kind == SymbolKindVariable || s.Kind == SymbolKindConstant || s.Kind == SymbolKindParameter {
+							availableIdentifiers = append(availableIdentifiers, s.Name)
+						}
 					}
 				}
 				// Also check child scopes (local variables)
@@ -1814,13 +1863,24 @@ func checkUndeclaredIdentifiers(doc *Document) []protocol.Diagnostic {
 				for i := len(scopeStack) - 1; i >= 0 && sym == nil; i-- {
 					sym = scopeStack[i].scope.Lookup(varName)
 				}
+				// Also check global/package symbols
+				if sym == nil && globalSymbolTable != nil {
+					sym = globalSymbolTable.GlobalScope.Lookup(varName)
+				}
 
 				if sym == nil {
 					// Variable not found - try to find a similar name
 					availableIdentifiers := []string{}
-					for _, s := range symbolTable.GlobalScope.Symbols {
+					for _, s := range localSymbolTable.GlobalScope.Symbols {
 						if s.Kind == SymbolKindVariable || s.Kind == SymbolKindConstant || s.Kind == SymbolKindParameter {
 							availableIdentifiers = append(availableIdentifiers, s.Name)
+						}
+					}
+					if globalSymbolTable != nil && globalSymbolTable != localSymbolTable {
+						for _, s := range globalSymbolTable.GlobalScope.Symbols {
+							if s.Kind == SymbolKindVariable || s.Kind == SymbolKindConstant || s.Kind == SymbolKindParameter {
+								availableIdentifiers = append(availableIdentifiers, s.Name)
+							}
 						}
 					}
 					// Also check child scopes

@@ -402,8 +402,20 @@ func (s *Server) handleDidChange(ctx context.Context, reply jsonrpc2.Replier, re
 			// Extract C header imports
 			doc.CHeaders, doc.CHeaderGlobal = extractCHeaderInfoWithURI(doc.AST, doc.URI)
 			
-			// Reload package files if program name changed or to refresh symbols
-			doc.ProgramName = extractProgramName(doc.AST)
+			// Check if program name changed
+			newProgramName := extractProgramName(doc.AST)
+			if newProgramName != doc.ProgramName {
+				// Program name changed - clear old package data
+				if doc.ProgramName != "" && newProgramName == "" {
+					// Program declaration removed - clear package files
+					debugLog.Printf("Program declaration removed, clearing package files")
+					doc.PackageFiles = nil
+					doc.PackageSymbols = nil
+				}
+				doc.ProgramName = newProgramName
+			}
+			
+			// Reload package files if there's a program name
 			if doc.ProgramName != "" {
 				s.loadPackageFiles(doc)
 			}
