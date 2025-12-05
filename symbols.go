@@ -27,6 +27,10 @@ func (s *Server) handleDocumentSymbol(ctx context.Context, reply jsonrpc2.Replie
 	allSymbols := doc.SymbolTable.GetAllSymbols()
 
 	for _, sym := range allSymbols {
+		// Skip symbols with empty names (required by LSP protocol)
+		if sym.Name == "" {
+			continue
+		}
 		// Only include top-level symbols (functions, enums, structs, constants)
 		if shouldIncludeInOutline(sym) {
 			docSymbol := symbolToDocumentSymbol(sym)
