@@ -388,6 +388,7 @@ func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
 			Type:       returnType,
 			Line:       node.Line,
 			Column:     0,
+			File:       st.FilePath, // Track which file this function is defined in
 			Parameters: []ParameterInfo{},
 		}
 		

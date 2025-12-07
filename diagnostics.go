@@ -94,6 +94,15 @@ func (s *Server) publishDiagnostics(ctx context.Context, doc *Document) {
 
 			diagnostics = append(diagnostics, argTypeDiags...)
 
+			// Check for duplicate function definitions across package files
+			duplicateFuncDiags := checkDuplicateFunctionDefinitions(doc)
+			diagnostics = append(diagnostics, duplicateFuncDiags...)
+
+			// Check for duplicate variable declarations in the same scope
+			// TEMPORARILY DISABLED - debugging false positives
+			// duplicateVarDiags := checkDuplicateVariableDeclarations(doc)
+			// diagnostics = append(diagnostics, duplicateVarDiags...)
+
 			// Check variable/constant type mismatches
 			typeMismatchDiags := checkTypeMismatches(doc)
 			diagnostics = append(diagnostics, typeMismatchDiags...)

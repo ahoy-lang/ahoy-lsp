@@ -193,6 +193,50 @@ func generateQuickFixes(doc *Document, diagnostic protocol.Diagnostic) []protoco
 		actions = append(actions, action)
 	}
 
+	// Fix duplicate variable declaration - change : to =
+	if diagnostic.Code == "duplicate-variable-declaration" || strings.Contains(message, "already declared") {
+		// Get the line content
+		line := int(diagnostic.Range.Start.Line)
+		if line >= 0 && line < len(doc.Lines) {
+			lineText := doc.Lines[line]
+			// Find the : and replace with =
+			colonIdx := strings.Index(lineText, ":")
+			if colonIdx >= 0 && colonIdx < len(lineText) {
+				// Check if it's followed by a type (letter or digit)
+				// If so, skip to the next :
+				if colonIdx+1 < len(lineText) && (lineText[colonIdx+1] >= 'A' && lineText[colonIdx+1] <= 'Z' || 
+					lineText[colonIdx+1] >= 'a' && lineText[colonIdx+1] <= 'z') {
+					// This is a type annotation like var:type= , find the = after type
+					equalIdx := strings.Index(lineText[colonIdx:], "=")
+					if equalIdx >= 0 {
+						colonIdx = colonIdx + equalIdx
+					}
+				}
+				
+				newText := lineText[:colonIdx] + "=" + lineText[colonIdx+1:]
+				action := protocol.CodeAction{
+					Title: "Change ':' to '=' (reassignment)",
+					Kind:  protocol.QuickFix,
+					Edit: &protocol.WorkspaceEdit{
+						Changes: map[protocol.DocumentURI][]protocol.TextEdit{
+							doc.URI: {
+								{
+									Range: protocol.Range{
+										Start: protocol.Position{Line: uint32(line), Character: 0},
+										End:   protocol.Position{Line: uint32(line), Character: uint32(len(lineText))},
+									},
+									NewText: newText,
+								},
+							},
+						},
+					},
+					Diagnostics: []protocol.Diagnostic{diagnostic},
+				}
+				actions = append(actions, action)
+			}
+		}
+	}
+
 	// Fix missing colon in assignment
 	if strings.Contains(message, "expected ':'") || strings.Contains(message, "missing assignment") {
 		action := protocol.CodeAction{
