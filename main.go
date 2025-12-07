@@ -110,10 +110,22 @@ func runValidate(filename string) {
 		Lines:   splitLines(string(content)),
 		AST:     ast,
 	}
-	doc.SymbolTable = BuildSymbolTable(ast)
+	doc.SymbolTable = BuildSymbolTableWithFile(ast, string(doc.URI))
 
 	// Parse C headers from imports - use file URI for path resolution
 	doc.CHeaders, doc.CHeaderGlobal = extractCHeaderInfoWithURI(ast, doc.URI)
+
+	// Extract program name and load package files for multi-file validation
+	if doc.AST != nil {
+		doc.ProgramName = extractProgramName(doc.AST)
+		if doc.ProgramName != "" {
+			// Create a minimal server just for loading package files
+			dummyServer := &Server{
+				documents: make(map[uri.URI]*Document),
+			}
+			dummyServer.loadPackageFiles(doc)
+		}
+	}
 
 	// Run all diagnostic checks (same as publishDiagnostics)
 	allDiagnostics := []protocol.Diagnostic{}
@@ -185,6 +197,10 @@ func runValidate(filename string) {
 	// Check for unhandled multi-return function calls
 	unhandledReturnDiags := checkUnhandledMultiReturns(doc)
 	allDiagnostics = append(allDiagnostics, unhandledReturnDiags...)
+
+	// Check for duplicate function definitions across package files
+	duplicateFuncDiags := checkDuplicateFunctionDefinitions(doc)
+	allDiagnostics = append(allDiagnostics, duplicateFuncDiags...)
 
 	// Filter for errors only
 	errorCount := 0

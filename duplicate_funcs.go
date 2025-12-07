@@ -16,8 +16,8 @@ func checkDuplicateFunctionDefinitions(doc *Document) []protocol.Diagnostic {
 		return diagnostics
 	}
 
-	// Only check if we're in a package (has PackageSymbols)
-	if doc.PackageSymbols == nil {
+	// Only check if we're in a package (has PackageFiles)
+	if doc.PackageFiles == nil || len(doc.PackageFiles) == 0 {
 		return diagnostics
 	}
 
@@ -54,79 +54,73 @@ func checkDuplicateFunctionDefinitions(doc *Document) []protocol.Diagnostic {
 
 	collectFuncs(doc.AST)
 
-	// Check against all functions in the package
+	// Check against all functions in ALL package files
 	for funcName, thisDef := range thisFuncs {
-		// DEBUG
-		if funcName == "draw_game_card" {
-			debugLog.Printf("Checking function %s at line %d in %s", funcName, thisDef.line, thisDef.file)
-		}
+		debugLog.Printf("[DupFunc] Checking function %s at line %d in %s", funcName, thisDef.line, thisDef.file)
 		
-		// Look up in package symbols
-		if sym := doc.PackageSymbols.GlobalScope.Lookup(funcName); sym != nil {
-			if funcName == "draw_game_card" {
-				debugLog.Printf("  Found symbol: Kind=%d, File=%s, Line=%d", sym.Kind, sym.File, sym.Line)
+		// Check each package file for this function
+		for pkgURI, pkgFile := range doc.PackageFiles {
+			if pkgFile.AST == nil {
+				continue
 			}
 			
-			if sym.Kind == SymbolKindFunction {
-				// DEBUG
-				if funcName == "draw_game_card" {
-					debugLog.Printf("  Comparing: sym.File='%s' vs doc.URI='%s', sym.Line=%d vs thisDef.line=%d", 
-						sym.File, string(doc.URI), sym.Line, thisDef.line)
-					debugLog.Printf("  Files equal? %v, Lines equal? %v", 
-						sym.File == string(doc.URI), sym.Line == thisDef.line)
+			// Collect functions from this package file
+			var findFunc func(node *ahoy.ASTNode) *ahoy.ASTNode
+			findFunc = func(node *ahoy.ASTNode) *ahoy.ASTNode {
+				if node == nil {
+					return nil
 				}
+				if node.Type == ahoy.NODE_FUNCTION && node.Value == funcName {
+					return node
+				}
+				for _, child := range node.Children {
+					if found := findFunc(child); found != nil {
+						return found
+					}
+				}
+				return nil
+			}
+			
+			if foundFunc := findFunc(pkgFile.AST); foundFunc != nil {
+				// Found the same function name in another file
+				debugLog.Printf("[DupFunc]   Found duplicate in %s at line %d", pkgURI, foundFunc.Line)
 				
-				// Check if this function is defined in a different location
-				// (different file OR different line in same file)
-				if sym.File != "" && (sym.File != string(doc.URI) || sym.Line != thisDef.line) {
-					// Found a duplicate function definition
-					
-					if funcName == "draw_game_card" {
-						debugLog.Printf("  REPORTING DUPLICATE!")
-					}
-					
-					// Get the other file name (just filename, not full path)
-					otherFile := sym.File
-					if idx := strings.LastIndex(sym.File, "/"); idx != -1 {
-						otherFile = sym.File[idx+1:]
-					}
-
-					// Get current file name
-					thisFile := string(doc.URI)
-					if idx := strings.LastIndex(thisFile, "/"); idx != -1 {
-						thisFile = thisFile[idx+1:]
-					}
-
-					lineText := ""
-					if thisDef.line > 0 && thisDef.line <= len(doc.Lines) {
-						lineText = doc.Lines[thisDef.line-1]
-					}
-					endChar := uint32(len(lineText))
-					if endChar == 0 {
-						endChar = uint32(len(funcName) + 20)
-					}
-
-					message := fmt.Sprintf("function '%s' already defined in %s line %d; function overloading not supported in ahoy", 
-						funcName, otherFile, sym.Line)
-
-					diagnostic := protocol.Diagnostic{
-						Range: protocol.Range{
-							Start: protocol.Position{
-								Line:      uint32(thisDef.line - 1),
-								Character: 0,
-							},
-							End: protocol.Position{
-								Line:      uint32(thisDef.line - 1),
-								Character: endChar,
-							},
-						},
-						Severity: protocol.DiagnosticSeverityError,
-						Source:   "ahoy",
-						Message:  message,
-						Code:     "duplicate-function-definition",
-					}
-					diagnostics = append(diagnostics, diagnostic)
+				// Get the other file name (just filename, not full path)
+				otherFile := string(pkgURI)
+				if idx := strings.LastIndex(otherFile, "/"); idx != -1 {
+					otherFile = otherFile[idx+1:]
 				}
+
+				lineText := ""
+				if thisDef.line > 0 && thisDef.line <= len(doc.Lines) {
+					lineText = doc.Lines[thisDef.line-1]
+				}
+				endChar := uint32(len(lineText))
+				if endChar == 0 {
+					endChar = uint32(len(funcName) + 20)
+				}
+
+				message := fmt.Sprintf("function '%s' already defined in %s line %d; function overloading not supported in ahoy", 
+					funcName, otherFile, foundFunc.Line)
+
+				diagnostic := protocol.Diagnostic{
+					Range: protocol.Range{
+						Start: protocol.Position{
+							Line:      uint32(thisDef.line - 1),
+							Character: 0,
+						},
+						End: protocol.Position{
+							Line:      uint32(thisDef.line - 1),
+							Character: endChar,
+						},
+					},
+					Severity: protocol.DiagnosticSeverityError,
+					Source:   "ahoy",
+					Message:  message,
+					Code:     "duplicate-function-definition",
+				}
+				diagnostics = append(diagnostics, diagnostic)
+				break // Only report once per function
 			}
 		}
 	}

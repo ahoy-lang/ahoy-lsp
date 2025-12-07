@@ -668,9 +668,23 @@ func mergeSymbolTable(dst *Scope, src *Scope) {
 
 	// Copy all symbols from src to dst
 	for name, symbol := range src.Symbols {
-		// Only add if not already present (current file takes precedence)
-		if _, exists := dst.Symbols[name]; !exists {
+		existingSymbol, exists := dst.Symbols[name]
+		
+		// For functions, we want to detect duplicates, so we keep the FIRST one
+		// but log when we encounter duplicates for debugging
+		if exists {
+			// If both are functions and from different files/lines, this is a duplicate
+			if symbol.Kind == SymbolKindFunction && existingSymbol.Kind == SymbolKindFunction {
+				if symbol.File != existingSymbol.File || symbol.Line != existingSymbol.Line {
+					debugLog.Printf("[MergeSymbols] Duplicate function %s found: existing=%s:%d, new=%s:%d", 
+						name, existingSymbol.File, existingSymbol.Line, symbol.File, symbol.Line)
+					// Keep the existing one (from current file), but we've logged the duplicate
+				}
+			}
+			debugLog.Printf("[MergeSymbols] Skipped duplicate symbol %s (already exists)", name)
+		} else {
 			dst.Symbols[name] = symbol
+			debugLog.Printf("[MergeSymbols] Added symbol %s (kind=%d, file=%s, line=%d)", name, symbol.Kind, symbol.File, symbol.Line)
 		}
 	}
 
