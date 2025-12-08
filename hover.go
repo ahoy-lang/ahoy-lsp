@@ -252,6 +252,104 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 		return reply(ctx, hover, nil)
 	}
 
+	// Check if hovering over a struct field (e.g., .suit in card_grid[0][0].suit)
+	if int(params.Position.Line) < len(doc.Lines) {
+		line := doc.Lines[int(params.Position.Line)]
+		charPos := int(params.Position.Character)
+		
+		if charPos > 0 && charPos <= len(line) {
+			beforeCursor := line[:charPos]
+			if dotIdx := strings.LastIndex(beforeCursor, "."); dotIdx >= 0 {
+				exprPart := strings.TrimSpace(beforeCursor[:dotIdx])
+				
+				// Infer the type of the expression before the dot
+				var objectType string
+				if doc.AST != nil {
+					objectType = inferTypeFromExpression(doc, exprPart, int(params.Position.Line))
+				}
+				
+				// Fallback to simple variable lookup
+				if objectType == "" {
+					objectName := ""
+					for i := len(exprPart) - 1; i >= 0; i-- {
+						ch := exprPart[i]
+						if (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '_' {
+							continue
+						}
+						objectName = exprPart[i+1:]
+						break
+					}
+					if objectName == "" && len(exprPart) > 0 {
+						objectName = exprPart
+					}
+					
+					if doc.SymbolTable != nil {
+						if sym := doc.SymbolTable.Lookup(objectName); sym != nil {
+							objectType = sym.Type
+						}
+					}
+				}
+				
+				// If we found the type, show struct field info
+				if objectType != "" {
+					// Check user-defined structs
+					if doc.AST != nil {
+						structDef := findStructDefinition(doc.AST, objectType)
+						if structDef != nil && structDef.Children != nil {
+							for _, typeNode := range structDef.Children {
+								if typeNode.Type == ahoy.NODE_TYPE {
+									for _, fieldNode := range typeNode.Children {
+										if fieldNode.Type == ahoy.NODE_IDENTIFIER && fieldNode.Value == word {
+											// Found the field - show hover info
+											fieldType := "unknown"
+											if typeNode.DataType != "" {
+												fieldType = typeNode.DataType
+											}
+											
+											hoverText := fmt.Sprintf("```ahoy\n%s: %s\n```\n\n", word, fieldType)
+											hoverText += fmt.Sprintf("**Struct Field** of `%s`\n\n", objectType)
+											hoverText += fmt.Sprintf("Defined at line %d", fieldNode.Line)
+											
+											hover := protocol.Hover{
+												Contents: protocol.MarkupContent{
+													Kind:  protocol.Markdown,
+													Value: hoverText,
+												},
+											}
+											return reply(ctx, hover, nil)
+										}
+									}
+								}
+							}
+						}
+					}
+					
+					// Check C header structs
+					if doc.CHeaderGlobal != nil {
+						for structName, cStruct := range doc.CHeaderGlobal.Structs {
+							if ahoy.ToLowerFirst(structName) == objectType || structName == objectType {
+								for _, fieldInfo := range cStruct.Fields {
+									if fieldInfo.Name == word {
+										hoverText := fmt.Sprintf("```c\n%s %s;\n```\n\n", fieldInfo.Type, word)
+										hoverText += fmt.Sprintf("**C Struct Field** of `%s`", structName)
+										
+										hover := protocol.Hover{
+											Contents: protocol.MarkupContent{
+												Kind:  protocol.Markdown,
+												Value: hoverText,
+											},
+										}
+										return reply(ctx, hover, nil)
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
 	// Look up Ahoy symbol in the symbol table
 	// Use PackageSymbols if available (for multi-file packages), otherwise use regular SymbolTable
 	var symbolTable *SymbolTable

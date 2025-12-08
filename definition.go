@@ -42,16 +42,16 @@ func getStdlibPath() string {
 		cacheDir = filepath.Join(homeDir, ".cache")
 	}
 	
-	// Check in ahoy cache directory (created by ahoy compiler) for .c file first
+	// Prefer .ahoy file for better goto definition support
+	ahoyPath := filepath.Join(cacheDir, "ahoy", "ahoy_stdlib.ahoy")
+	if _, err := os.Stat(ahoyPath); err == nil {
+		return ahoyPath
+	}
+	
+	// Fallback to .c file for backwards compatibility
 	cachedPath := filepath.Join(cacheDir, "ahoy", "ahoy_stdlib.c")
 	if _, err := os.Stat(cachedPath); err == nil {
 		return cachedPath
-	}
-	
-	// Fallback to old .ahoy file for backwards compatibility
-	oldPath := filepath.Join(cacheDir, "ahoy", "ahoy_stdlib.ahoy")
-	if _, err := os.Stat(oldPath); err == nil {
-		return oldPath
 	}
 	
 	return ""
@@ -77,143 +77,110 @@ func loadStdlib() {
 		
 		lines := strings.Split(string(content), "\n")
 		var currentCategory string
-		var currentDoc strings.Builder
-		
-		// Check if this is a .c file (new format) or .ahoy file (old format)
-		isCFormat := strings.HasSuffix(stdlibPath, ".c")
+		inAPISection := false
 		
 		for i, line := range lines {
 			lineNum := i + 1
 			trimmed := strings.TrimSpace(line)
 			
-			// Track category sections - handle both formats
-			if strings.Contains(trimmed, "ARRAY METHODS") {
-				currentCategory = "array"
-			} else if strings.Contains(trimmed, "DICTIONARY METHODS") {
-				currentCategory = "dict"
-			} else if strings.Contains(trimmed, "STRING METHODS") {
-				currentCategory = "string"
-			} else if strings.Contains(trimmed, "BUILT-IN FUNCTIONS") {
-				currentCategory = "builtin"
+			// Check if we're entering API reference section
+			if strings.Contains(trimmed, "? API REFERENCE") {
+				inAPISection = true
+				continue
 			}
 			
-			if isCFormat {
-				// Parse C format: * @ function_name |params| return_type:
-				// Collect documentation from * ? comments
-				if strings.HasPrefix(trimmed, "* ?") {
-					docLine := strings.TrimPrefix(trimmed, "* ? ")
-					currentDoc.WriteString(docLine)
-					currentDoc.WriteString("\n")
+			// Check if we're leaving API section
+			if inAPISection && strings.Contains(trimmed, "? IMPLEMENTATIONS") {
+				inAPISection = false
+				continue
+			}
+			
+			// Track category sections in API reference
+			if inAPISection {
+				if strings.HasPrefix(trimmed, "? Arrays") {
+					currentCategory = "array"
+					continue
+				} else if strings.HasPrefix(trimmed, "? Dictionaries") {
+					currentCategory = "dict"
+					continue
+				} else if strings.HasPrefix(trimmed, "? Strings") {
+					currentCategory = "string"
+					continue
+				} else if strings.HasPrefix(trimmed, "? Built-in Functions") {
+					currentCategory = "builtin"
 					continue
 				}
 				
-				// Parse function definition line in C format
-				if strings.HasPrefix(trimmed, "* @ ") {
-					// Format: * @ method_name |params| return_type:
-					defLine := strings.TrimPrefix(trimmed, "* @ ")
-					parts := strings.SplitN(defLine, "|", 3)
-					if len(parts) >= 2 {
-						funcName := strings.TrimSpace(parts[0])
-						
-						// Extract the actual method name from prefixed names like "array_length"
-						methodName := funcName
-						if strings.HasPrefix(funcName, "array_") {
-							methodName = strings.TrimPrefix(funcName, "array_")
-						} else if strings.HasPrefix(funcName, "dict_") {
-							methodName = strings.TrimPrefix(funcName, "dict_")
-						} else if strings.HasPrefix(funcName, "string_") {
-							methodName = strings.TrimPrefix(funcName, "string_")
-						}
-						
-						params := ""
-						returnType := ""
-						if len(parts) >= 3 {
-							params = parts[1]
-							retPart := parts[2]
-							if idx := strings.Index(retPart, ":"); idx != -1 {
-								returnType = strings.TrimSpace(retPart[:idx])
-							}
-						}
-						
-						// Store with both full name and method name
-						method := StdlibMethod{
-							Name:       methodName,
-							Category:   currentCategory,
-							Line:       lineNum,
-							ReturnType: returnType,
-							Params:     params,
-							Doc:        currentDoc.String(),
-						}
-						stdlibMethods[funcName] = method
-						// Also store by just method name for easier lookup
-						if methodName != funcName {
-							key := currentCategory + "." + methodName
-							stdlibMethods[key] = method
-						}
-						
-						currentDoc.Reset()
-					}
-				}
-			} else {
-				// Old .ahoy format parsing
-				// Collect documentation comments
-				if strings.HasPrefix(trimmed, "?") {
-					currentDoc.WriteString(strings.TrimPrefix(trimmed, "? "))
-					currentDoc.WriteString("\n")
-					continue
-				}
-				
-				// Parse function definitions
-				if strings.HasPrefix(trimmed, "@ ") {
-					// Format: @ method_name |params| return_type:
-					parts := strings.SplitN(trimmed, "|", 3)
-					if len(parts) >= 2 {
-						funcName := strings.TrimSpace(strings.TrimPrefix(parts[0], "@ "))
-						
-						// Extract the actual method name from prefixed names like "array_length"
-						methodName := funcName
-						if strings.HasPrefix(funcName, "array_") {
-							methodName = strings.TrimPrefix(funcName, "array_")
-						} else if strings.HasPrefix(funcName, "dict_") {
-							methodName = strings.TrimPrefix(funcName, "dict_")
-						} else if strings.HasPrefix(funcName, "string_") {
-							methodName = strings.TrimPrefix(funcName, "string_")
-						}
-						
-						params := ""
-						returnType := ""
-						if len(parts) >= 3 {
-							params = parts[1]
-							retPart := parts[2]
-							if idx := strings.Index(retPart, ":"); idx != -1 {
-								returnType = strings.TrimSpace(retPart[:idx])
-							}
-						}
-						
-						// Store with both full name and method name
-						method := StdlibMethod{
-							Name:       methodName,
-							Category:   currentCategory,
-							Line:       lineNum,
-							ReturnType: returnType,
-							Params:     params,
-							Doc:        currentDoc.String(),
-						}
-						stdlibMethods[funcName] = method
-						// Also store by just method name for easier lookup
-						if methodName != funcName {
-							key := currentCategory + "." + methodName
-							stdlibMethods[key] = method
-						}
-						
-						currentDoc.Reset()
-					}
+				// Parse method definitions in API section
+				// Format: array.push|arr:array, value:any| ? -> array
+				// Format: print|value:any| ? -> void
+				if trimmed != "" && !strings.HasPrefix(trimmed, "?") && strings.Contains(trimmed, "|") {
+					parseAPIMethodLine(trimmed, currentCategory, lineNum)
 				}
 			}
 		}
-		
-		debugLog.Printf("Loaded %d stdlib methods from %s", len(stdlibMethods), stdlibPath)
 	})
+}
+
+// parseAPIMethodLine parses a single method definition line from the API reference
+func parseAPIMethodLine(line string, category string, lineNum int) {
+	// Format: array.push|params| ? -> returnType
+	// Format: print|params| ? -> returnType
+	
+	// Split by |
+	parts := strings.Split(line, "|")
+	if len(parts) < 2 {
+		return
+	}
+	
+	// Extract method name (before first |)
+	methodPart := strings.TrimSpace(parts[0])
+	var methodName string
+	
+	if strings.Contains(methodPart, ".") {
+		// Category method: array.push -> push
+		dotParts := strings.Split(methodPart, ".")
+		if len(dotParts) == 2 {
+			methodName = dotParts[1]
+		}
+	} else {
+		// Builtin function: print
+		methodName = methodPart
+	}
+	
+	// Extract params (between first and second |)
+	params := ""
+	if len(parts) >= 2 {
+		params = strings.TrimSpace(parts[1])
+	}
+	
+	// Extract return type (after ? ->)
+	returnType := ""
+	if len(parts) >= 3 {
+		remaining := parts[2]
+		if idx := strings.Index(remaining, "? ->"); idx != -1 {
+			returnType = strings.TrimSpace(remaining[idx+4:])
+		}
+	}
+	
+	// Store the method
+	method := StdlibMethod{
+		Name:       methodName,
+		Category:   category,
+		Line:       lineNum,
+		ReturnType: returnType,
+		Params:     params,
+		Doc:        "",
+	}
+	
+	// Store with category.method key for easy lookup
+	key := category + "." + methodName
+	stdlibMethods[key] = method
+	
+	// Also store by just method name for builtin functions
+	if category == "builtin" {
+		stdlibMethods[methodName] = method
+	}
 }
 
 // getStdlibMethodLocation returns the location of a stdlib method
@@ -525,40 +492,101 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 		}
 	}
 
-	// Check for stdlib method calls (array.push, dict.keys, string.upper, etc.)
-	// Look for method call context by checking if cursor is after a dot
+	// Check for struct field access or method calls
+	// Look for context by checking if cursor is after a dot
 	line := ""
 	if int(params.Position.Line) < len(doc.Lines) {
 		line = doc.Lines[int(params.Position.Line)]
 	}
 	
-	// Find if we're in a method call context
+	// Find if we're in a member access context
 	charPos := int(params.Position.Character)
 	if charPos > 0 && charPos <= len(line) {
 		// Look backward for a dot
 		beforeCursor := line[:charPos]
 		if dotIdx := strings.LastIndex(beforeCursor, "."); dotIdx >= 0 {
-			// Get the object before the dot
-			objectPart := strings.TrimSpace(beforeCursor[:dotIdx])
-			// Extract the last identifier before the dot
-			objectName := ""
-			for i := len(objectPart) - 1; i >= 0; i-- {
-				ch := objectPart[i]
-				if (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '_' {
-					continue
-				}
-				objectName = objectPart[i+1:]
-				break
-			}
-			if objectName == "" && len(objectPart) > 0 {
-				objectName = objectPart
+			// Get the expression before the dot
+			exprPart := strings.TrimSpace(beforeCursor[:dotIdx])
+			
+			// Try to infer the type of the expression
+			// This handles complex expressions like card_grid[0][0].suit
+			var objectType string
+			
+			// Parse the AST to find the type of the expression at the cursor
+			if doc.AST != nil {
+				objectType = inferTypeFromExpression(doc, exprPart, int(params.Position.Line))
 			}
 			
-			// Try to infer object type
-			objectType := ""
-			if doc.SymbolTable != nil {
-				if sym := doc.SymbolTable.Lookup(objectName); sym != nil {
-					objectType = sym.Type
+			// Fallback: extract simple identifier for backwards compatibility
+			if objectType == "" {
+				objectName := ""
+				for i := len(exprPart) - 1; i >= 0; i-- {
+					ch := exprPart[i]
+					if (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '_' {
+						continue
+					}
+					objectName = exprPart[i+1:]
+					break
+				}
+				if objectName == "" && len(exprPart) > 0 {
+					objectName = exprPart
+				}
+				
+				if doc.SymbolTable != nil {
+					if sym := doc.SymbolTable.Lookup(objectName); sym != nil {
+						objectType = sym.Type
+					}
+				}
+			}
+			
+			// Check if it's a struct field access
+			if objectType != "" {
+				// Check user-defined structs in AST
+				if doc.AST != nil {
+					structDef := findStructDefinition(doc.AST, objectType)
+					if structDef != nil && structDef.Children != nil {
+						// Look through struct fields (NODE_TYPE nodes with identifier children)
+						for _, typeNode := range structDef.Children {
+							if typeNode.Type == ahoy.NODE_TYPE {
+								for _, fieldNode := range typeNode.Children {
+									if fieldNode.Type == ahoy.NODE_IDENTIFIER && fieldNode.Value == word {
+										location := protocol.Location{
+											URI: params.TextDocument.URI,
+											Range: protocol.Range{
+												Start: protocol.Position{Line: uint32(fieldNode.Line - 1), Character: 0},
+												End:   protocol.Position{Line: uint32(fieldNode.Line - 1), Character: 100},
+											},
+										}
+										debugLog.Printf("Go to definition: struct field %s.%s -> line %d", objectType, word, fieldNode.Line)
+										return reply(ctx, location, nil)
+									}
+								}
+							}
+						}
+					}
+				}
+				
+				// Check C header structs
+				if doc.CHeaderGlobal != nil {
+					for structName, cStruct := range doc.CHeaderGlobal.Structs {
+						if ahoy.ToLowerFirst(structName) == objectType || structName == objectType {
+							for _, fieldInfo := range cStruct.Fields {
+								if fieldInfo.Name == word {
+									if cStruct.File != "" {
+										location := protocol.Location{
+											URI: protocol.URI("file://" + cStruct.File),
+											Range: protocol.Range{
+												Start: protocol.Position{Line: uint32(cStruct.Line - 1), Character: 0},
+												End:   protocol.Position{Line: uint32(cStruct.Line - 1), Character: 100},
+											},
+										}
+										debugLog.Printf("Go to definition: C struct field %s.%s -> %s:%d", structName, word, cStruct.File, cStruct.Line)
+										return reply(ctx, location, nil)
+									}
+								}
+							}
+						}
+					}
 				}
 			}
 			
@@ -729,4 +757,83 @@ func isWordChar(ch rune) bool {
 		(ch >= 'A' && ch <= 'Z') ||
 		(ch >= '0' && ch <= '9') ||
 		ch == '_'
+}
+
+// inferTypeFromExpression tries to determine the type of a complex expression
+// Handles array access like card_grid[0][0] to determine the final element type
+func inferTypeFromExpression(doc *Document, expr string, line int) string {
+	// Remove whitespace
+	expr = strings.TrimSpace(expr)
+	if expr == "" {
+		return ""
+	}
+	
+	// Check if it's an array access pattern (ends with ]
+	if strings.HasSuffix(expr, "]") {
+		// Find the base variable name (before any [ characters)
+		bracketIdx := strings.Index(expr, "[")
+		if bracketIdx > 0 {
+			baseName := expr[:bracketIdx]
+			
+			// Look up the base variable type
+			if doc.SymbolTable != nil {
+				if sym := doc.SymbolTable.Lookup(baseName); sym != nil {
+					baseType := sym.Type
+					
+					// Count the number of array accesses
+					accessCount := strings.Count(expr, "[")
+					
+					// For each array access, unwrap one level of array type
+					currentType := baseType
+					for i := 0; i < accessCount; i++ {
+						// Check if it's a typed array like array[Type]
+						if strings.HasPrefix(currentType, "array[") {
+							// Extract the element type
+							currentType = strings.TrimSuffix(strings.TrimPrefix(currentType, "array["), "]")
+						} else if currentType == "array" {
+							// Untyped array - we can't infer further
+							return ""
+						} else {
+							// Not an array type, return what we have
+							return currentType
+						}
+					}
+					
+					return currentType
+				}
+			}
+		}
+	}
+	
+	// Simple identifier - look it up directly
+	if !strings.ContainsAny(expr, "[]()") {
+		if doc.SymbolTable != nil {
+			if sym := doc.SymbolTable.Lookup(expr); sym != nil {
+				return sym.Type
+			}
+		}
+	}
+	
+	return ""
+}
+
+// findStructDefinition finds a struct declaration in the AST by name
+func findStructDefinition(ast *ahoy.ASTNode, structName string) *ahoy.ASTNode {
+	if ast == nil {
+		return nil
+	}
+	
+	// Check if this node is the struct we're looking for
+	if ast.Type == ahoy.NODE_STRUCT_DECLARATION && ast.Value == structName {
+		return ast
+	}
+	
+	// Recursively search children
+	for _, child := range ast.Children {
+		if result := findStructDefinition(child, structName); result != nil {
+			return result
+		}
+	}
+	
+	return nil
 }
