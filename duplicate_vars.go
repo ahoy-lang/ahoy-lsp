@@ -53,6 +53,42 @@ func checkDuplicateVariableDeclarations(doc *Document) []protocol.Diagnostic {
 			}
 			return
 
+		case ahoy.NODE_IF_STATEMENT:
+			// Handle if/else branches - allow same variable in each branch if not already in parent scope
+			debugLog.Printf("Found NODE_IF_STATEMENT at line %d, inFunction=%v, seenVars=%v", node.Line, inFunction, seenVars != nil)
+			if inFunction && seenVars != nil {
+				// Process if/elif/else branches separately to allow same variable in each
+				debugLog.Printf("Processing %d if/else branches", len(node.Children))
+				for i, child := range node.Children {
+					// Each branch gets its own scope (copy of parent scope)
+					branchVars := make(map[string]varDecl)
+					for k, v := range seenVars {
+						branchVars[k] = v
+					}
+					debugLog.Printf("Processing branch %d with %d parent vars", i, len(seenVars))
+					checkNode(child, inFunction, branchVars)
+				}
+				return
+			}
+
+		case ahoy.NODE_SWITCH_STATEMENT:
+			// Handle switch cases - allow same variable in each case if not already in parent scope
+			if inFunction && seenVars != nil {
+				// Skip the condition (first child)
+				if len(node.Children) > 0 {
+					// Process each case separately
+					for i := 1; i < len(node.Children); i++ {
+						// Each case gets its own scope (copy of parent scope)
+						caseVars := make(map[string]varDecl)
+						for k, v := range seenVars {
+							caseVars[k] = v
+						}
+						checkNode(node.Children[i], inFunction, caseVars)
+					}
+				}
+				return
+			}
+
 		case ahoy.NODE_VARIABLE_DECLARATION:
 			// Only check if we're inside a function
 			if inFunction && seenVars != nil {
@@ -107,8 +143,8 @@ func checkDuplicateVariableDeclarations(doc *Document) []protocol.Diagnostic {
 			return
 		}
 
-		// Recursively check children (but only if not inside a function being processed separately)
-		if node.Type != ahoy.NODE_FUNCTION {
+		// Recursively check children (but skip if already handled specially)
+		if node.Type != ahoy.NODE_FUNCTION && node.Type != ahoy.NODE_IF_STATEMENT && node.Type != ahoy.NODE_SWITCH_STATEMENT {
 			for _, child := range node.Children {
 				checkNode(child, inFunction, seenVars)
 			}
