@@ -451,36 +451,6 @@ func checkConstMethodCalls(doc *Document) []protocol.Diagnostic {
 			return
 		}
 
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
 		switch node.Type {
 		case ahoy.NODE_METHOD_CALL, ahoy.NODE_MEMBER_ACCESS:
 			// Check if the target of the method/member access is a constant
@@ -572,36 +542,6 @@ func checkInvalidMethodCalls(doc *Document) []protocol.Diagnostic {
 	var checkNode func(*ahoy.ASTNode, int)
 	checkNode = func(node *ahoy.ASTNode, depth int) {
 		if node == nil {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
 			return
 		}
 
@@ -1104,36 +1044,6 @@ func checkEnumNameDuplicates(doc *Document) []protocol.Diagnostic {
 			return
 		}
 
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
 		if node.Type == ahoy.NODE_ENUM_DECLARATION {
 			enumName := node.Value
 			if enumName != "" {
@@ -1332,36 +1242,6 @@ func checkUndefinedFunctions(doc *Document) []protocol.Diagnostic {
 			return
 		}
 
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
-		// Prevent excessive recursion
-		if depth > 500 {
-			return
-		}
-
 		if node.Type == ahoy.NODE_CALL {
 			funcName := node.Value
 
@@ -1449,7 +1329,7 @@ func checkUndeclaredIdentifiers(doc *Document) []protocol.Diagnostic {
 	globalSymbolTable := getSymbolTable(doc)
 	// Use the document's own symbol table for scope traversal (preserves function scopes)
 	localSymbolTable := doc.SymbolTable
-	
+
 	if doc.AST == nil || localSymbolTable == nil {
 		return diagnostics
 	}
@@ -1569,7 +1449,7 @@ func checkUndeclaredIdentifiers(doc *Document) []protocol.Diagnostic {
 			// Look up the identifier in the current scope (searches parent scopes too)
 			// First, look up in the current local scope (function params, local vars)
 			sym := scope.Lookup(identifierName)
-			
+
 			// If not found locally, also check the global/package symbol table
 			// This handles cross-file symbols in multi-file programs
 			if sym == nil && globalSymbolTable != nil && globalSymbolTable != localSymbolTable {
@@ -1581,7 +1461,7 @@ func checkUndeclaredIdentifiers(doc *Document) []protocol.Diagnostic {
 				// Check if the symbol is in the current scope chain (function scope or nested scopes)
 				// We need to check if the symbol is LOCAL to the function (not global)
 				foundInFunctionScope := false
-				
+
 				// Walk up the scope stack to see if it's defined in any function-local scope
 				for i := len(scopeStack) - 1; i >= 0; i-- {
 					scopeToCheck := scopeStack[i].scope
@@ -1594,7 +1474,7 @@ func checkUndeclaredIdentifiers(doc *Document) []protocol.Diagnostic {
 						break
 					}
 				}
-				
+
 				// If not found in any function-local scope, check if it's a global variable
 				if !foundInFunctionScope {
 					// Check if it's in the global scope
