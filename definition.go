@@ -25,10 +25,10 @@ type StdlibMethod struct {
 }
 
 var (
-	stdlibMethods     map[string]StdlibMethod
-	stdlibPath        string
-	stdlibLoadOnce    sync.Once
-	stdlibLoadErr     error
+	stdlibMethods  map[string]StdlibMethod
+	stdlibPath     string
+	stdlibLoadOnce sync.Once
+	stdlibLoadErr  error
 )
 
 // getStdlibPath returns the path to the stdlib file in the ahoy cache directory
@@ -41,19 +41,19 @@ func getStdlibPath() string {
 		}
 		cacheDir = filepath.Join(homeDir, ".cache")
 	}
-	
+
 	// Prefer .ahoy file for better goto definition support
 	ahoyPath := filepath.Join(cacheDir, "ahoy", "ahoy_stdlib.ahoy")
 	if _, err := os.Stat(ahoyPath); err == nil {
 		return ahoyPath
 	}
-	
+
 	// Fallback to .c file for backwards compatibility
 	cachedPath := filepath.Join(cacheDir, "ahoy", "ahoy_stdlib.c")
 	if _, err := os.Stat(cachedPath); err == nil {
 		return cachedPath
 	}
-	
+
 	return ""
 }
 
@@ -62,39 +62,39 @@ func loadStdlib() {
 	stdlibLoadOnce.Do(func() {
 		stdlibMethods = make(map[string]StdlibMethod)
 		stdlibPath = getStdlibPath()
-		
+
 		if stdlibPath == "" {
 			debugLog.Printf("Stdlib not found")
 			return
 		}
-		
+
 		content, err := os.ReadFile(stdlibPath)
 		if err != nil {
 			stdlibLoadErr = err
 			debugLog.Printf("Failed to read stdlib: %v", err)
 			return
 		}
-		
+
 		lines := strings.Split(string(content), "\n")
 		var currentCategory string
 		inAPISection := false
-		
+
 		for i, line := range lines {
 			lineNum := i + 1
 			trimmed := strings.TrimSpace(line)
-			
+
 			// Check if we're entering API reference section
 			if strings.Contains(trimmed, "? API REFERENCE") {
 				inAPISection = true
 				continue
 			}
-			
+
 			// Check if we're leaving API section
 			if inAPISection && strings.Contains(trimmed, "? IMPLEMENTATIONS") {
 				inAPISection = false
 				continue
 			}
-			
+
 			// Track category sections in API reference
 			if inAPISection {
 				if strings.HasPrefix(trimmed, "? Arrays") {
@@ -110,7 +110,7 @@ func loadStdlib() {
 					currentCategory = "builtin"
 					continue
 				}
-				
+
 				// Parse method definitions in API section
 				// Format: array.push|arr:array, value:any| ? -> array
 				// Format: print|value:any| ? -> void
@@ -126,17 +126,17 @@ func loadStdlib() {
 func parseAPIMethodLine(line string, category string, lineNum int) {
 	// Format: array.push|params| ? -> returnType
 	// Format: print|params| ? -> returnType
-	
+
 	// Split by |
 	parts := strings.Split(line, "|")
 	if len(parts) < 2 {
 		return
 	}
-	
+
 	// Extract method name (before first |)
 	methodPart := strings.TrimSpace(parts[0])
 	var methodName string
-	
+
 	if strings.Contains(methodPart, ".") {
 		// Category method: array.push -> push
 		dotParts := strings.Split(methodPart, ".")
@@ -147,13 +147,13 @@ func parseAPIMethodLine(line string, category string, lineNum int) {
 		// Builtin function: print
 		methodName = methodPart
 	}
-	
+
 	// Extract params (between first and second |)
 	params := ""
 	if len(parts) >= 2 {
 		params = strings.TrimSpace(parts[1])
 	}
-	
+
 	// Extract return type (after ? ->)
 	returnType := ""
 	if len(parts) >= 3 {
@@ -162,7 +162,7 @@ func parseAPIMethodLine(line string, category string, lineNum int) {
 			returnType = strings.TrimSpace(remaining[idx+4:])
 		}
 	}
-	
+
 	// Store the method
 	method := StdlibMethod{
 		Name:       methodName,
@@ -172,11 +172,11 @@ func parseAPIMethodLine(line string, category string, lineNum int) {
 		Params:     params,
 		Doc:        "",
 	}
-	
+
 	// Store with category.method key for easy lookup
 	key := category + "." + methodName
 	stdlibMethods[key] = method
-	
+
 	// Also store by just method name for builtin functions
 	if category == "builtin" {
 		stdlibMethods[methodName] = method
@@ -186,11 +186,11 @@ func parseAPIMethodLine(line string, category string, lineNum int) {
 // getStdlibMethodLocation returns the location of a stdlib method
 func getStdlibMethodLocation(methodName string, objectType string) *protocol.Location {
 	loadStdlib()
-	
+
 	if stdlibPath == "" || len(stdlibMethods) == 0 {
 		return nil
 	}
-	
+
 	// Determine category based on object type
 	category := ""
 	switch {
@@ -201,7 +201,7 @@ func getStdlibMethodLocation(methodName string, objectType string) *protocol.Loc
 	case objectType == "string" || objectType == "char*":
 		category = "string"
 	}
-	
+
 	// Try category-specific lookup first
 	if category != "" {
 		key := category + "." + methodName
@@ -226,7 +226,7 @@ func getStdlibMethodLocation(methodName string, objectType string) *protocol.Loc
 			}
 		}
 	}
-	
+
 	// Try all categories
 	for _, cat := range []string{"array", "dict", "string", "builtin"} {
 		key := cat + "." + methodName
@@ -250,7 +250,7 @@ func getStdlibMethodLocation(methodName string, objectType string) *protocol.Loc
 			}
 		}
 	}
-	
+
 	return nil
 }
 
@@ -259,7 +259,7 @@ func resolveImportPath(importPath string, docURI protocol.URI) string {
 	if filepath.IsAbs(importPath) {
 		return importPath
 	}
-	
+
 	docPath := string(docURI)
 	if strings.HasPrefix(docPath, "file://") {
 		docPath = docPath[7:]
@@ -315,7 +315,7 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 				}
 			}
 		}
-		
+
 		// Check if it's a C enum VALUE (not enum name)
 		for _, cEnum := range doc.CHeaderGlobal.Enums {
 			if _, ok := cEnum.Values[word]; ok {
@@ -340,7 +340,7 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 				}
 			}
 		}
-		
+
 		if cDefine, ok := doc.CHeaderGlobal.Defines[word]; ok {
 			// Use the File field directly from the define
 			if cDefine.File != "" {
@@ -355,7 +355,7 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 				return reply(ctx, location, nil)
 			}
 		}
-		
+
 		// Check C structs (case-insensitive)
 		for structName, cStruct := range doc.CHeaderGlobal.Structs {
 			if ahoy.ToLowerFirst(structName) == word || structName == word {
@@ -373,7 +373,7 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 				}
 			}
 		}
-		
+
 		// Check C typedef aliases - go to the typedef line itself
 		if doc.CHeaderGlobal.Typedefs != nil {
 			if typedef, isAlias := doc.CHeaderGlobal.Typedefs[word]; isAlias {
@@ -391,7 +391,7 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 			}
 		}
 	}
-	
+
 	// Check namespaced C headers
 	for namespace, headerInfo := range doc.CHeaders {
 		// Check functions
@@ -413,7 +413,7 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 				}
 			}
 		}
-		
+
 		// Check enum values
 		for _, cEnum := range headerInfo.Enums {
 			if _, ok := cEnum.Values[word]; ok {
@@ -439,7 +439,7 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 				}
 			}
 		}
-		
+
 		// Check defines
 		if cDefine, ok := headerInfo.Defines[word]; ok {
 			for _, child := range doc.AST.Children {
@@ -457,7 +457,7 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 				}
 			}
 		}
-		
+
 		// Check structs
 		for structName, cStruct := range headerInfo.Structs {
 			if ahoy.ToLowerFirst(structName) == word || structName == word {
@@ -477,7 +477,7 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 				}
 			}
 		}
-		
+
 		// Check typedef aliases - go to the typedef line itself
 		if headerInfo.Typedefs != nil {
 			if typedef, isAlias := headerInfo.Typedefs[word]; isAlias {
@@ -507,7 +507,7 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 	if int(params.Position.Line) < len(doc.Lines) {
 		line = doc.Lines[int(params.Position.Line)]
 	}
-	
+
 	// Find if we're in a member access context
 	charPos := int(params.Position.Character)
 	if charPos > 0 && charPos <= len(line) {
@@ -516,16 +516,16 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 		if dotIdx := strings.LastIndex(beforeCursor, "."); dotIdx >= 0 {
 			// Get the expression before the dot
 			exprPart := strings.TrimSpace(beforeCursor[:dotIdx])
-			
+
 			// Try to infer the type of the expression
 			// This handles complex expressions like card_grid[0][0].suit
 			var objectType string
-			
+
 			// Parse the AST to find the type of the expression at the cursor
 			if doc.AST != nil {
 				objectType = inferTypeFromExpression(doc, exprPart, int(params.Position.Line))
 			}
-			
+
 			// Fallback: extract simple identifier for backwards compatibility
 			if objectType == "" {
 				objectName := ""
@@ -540,14 +540,14 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 				if objectName == "" && len(exprPart) > 0 {
 					objectName = exprPart
 				}
-				
+
 				if doc.SymbolTable != nil {
 					if sym := doc.SymbolTable.Lookup(objectName); sym != nil {
 						objectType = sym.Type
 					}
 				}
 			}
-			
+
 			// Check if it's a struct field access
 			if objectType != "" {
 				// Check user-defined structs in AST
@@ -574,7 +574,7 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 						}
 					}
 				}
-				
+
 				// Check C header structs
 				if doc.CHeaderGlobal != nil {
 					for structName, cStruct := range doc.CHeaderGlobal.Structs {
@@ -598,7 +598,7 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 					}
 				}
 			}
-			
+
 			// Check if word is a stdlib method
 			if location := getStdlibMethodLocation(word, objectType); location != nil {
 				debugLog.Printf("Go to definition: stdlib method %s -> %s:%d", word, stdlibPath, location.Range.Start.Line+1)
@@ -606,7 +606,7 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 			}
 		}
 	}
-	
+
 	// Also check if the word itself is a builtin function like print, log, panic
 	builtinFuncs := []string{"print", "log", "panic", "assert", "free"}
 	for _, builtin := range builtinFuncs {
@@ -622,7 +622,7 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 	// Use PackageSymbols if available (for multi-file packages), otherwise use regular SymbolTable
 	var symbolTable *SymbolTable
 	var symbol *Symbol
-	
+
 	if doc.PackageSymbols != nil {
 		symbolTable = doc.PackageSymbols
 		symbol = symbolTable.LookupAtPosition(word, int(params.Position.Line)+1, int(params.Position.Character))
@@ -632,12 +632,12 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 		symbol = symbolTable.LookupAtPosition(word, int(params.Position.Line)+1, int(params.Position.Character))
 		debugLog.Printf("Go to definition: Looking for '%s' in SymbolTable at line %d - found: %v", word, int(params.Position.Line)+1, symbol != nil)
 	}
-	
+
 	if symbol != nil {
 		// Find which file contains this symbol (check package files)
 		targetURI := params.TextDocument.URI
 		bestSymbol := symbol
-		
+
 		// If we found the symbol in package symbols, check which file it's actually from
 		if doc.PackageSymbols != nil && doc.PackageFiles != nil {
 			// Collect all matching symbols from all files
@@ -645,7 +645,7 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 				sym *Symbol
 				uri protocol.URI
 			}{}
-			
+
 			// Add current file symbol
 			if doc.SymbolTable != nil {
 				if currentSym := doc.SymbolTable.LookupAtPosition(word, int(params.Position.Line)+1, int(params.Position.Character)); currentSym != nil {
@@ -655,7 +655,7 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 					}{currentSym, params.TextDocument.URI})
 				}
 			}
-			
+
 			// Add package file symbols
 			for pkgURI, pkgFile := range doc.PackageFiles {
 				if pkgFile.Symbols != nil {
@@ -667,7 +667,7 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 					}
 				}
 			}
-			
+
 			// Find the closest symbol before or at the cursor position
 			cursorLine := int(params.Position.Line) + 1
 			for _, candidate := range allSymbols {
@@ -695,7 +695,7 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 				}
 			}
 		}
-		
+
 		// Return the definition location
 		location := protocol.Location{
 			URI: targetURI,
@@ -724,7 +724,7 @@ func getWordAtPosition(doc *Document, line, character int) string {
 	if doc == nil || doc.Lines == nil {
 		return ""
 	}
-	
+
 	if line < 0 || line >= len(doc.Lines) {
 		return ""
 	}
@@ -776,22 +776,22 @@ func inferTypeFromExpression(doc *Document, expr string, line int) string {
 	if expr == "" {
 		return ""
 	}
-	
+
 	// Check if it's an array access pattern (ends with ]
 	if strings.HasSuffix(expr, "]") {
 		// Find the base variable name (before any [ characters)
 		bracketIdx := strings.Index(expr, "[")
 		if bracketIdx > 0 {
 			baseName := expr[:bracketIdx]
-			
+
 			// Look up the base variable type
 			if doc.SymbolTable != nil {
 				if sym := doc.SymbolTable.Lookup(baseName); sym != nil {
 					baseType := sym.Type
-					
+
 					// Count the number of array accesses
 					accessCount := strings.Count(expr, "[")
-					
+
 					// For each array access, unwrap one level of array type
 					currentType := baseType
 					for i := 0; i < accessCount; i++ {
@@ -807,13 +807,13 @@ func inferTypeFromExpression(doc *Document, expr string, line int) string {
 							return currentType
 						}
 					}
-					
+
 					return currentType
 				}
 			}
 		}
 	}
-	
+
 	// Simple identifier - look it up directly
 	if !strings.ContainsAny(expr, "[]()") {
 		if doc.SymbolTable != nil {
@@ -822,7 +822,7 @@ func inferTypeFromExpression(doc *Document, expr string, line int) string {
 			}
 		}
 	}
-	
+
 	return ""
 }
 
@@ -831,19 +831,19 @@ func findStructDefinition(ast *ahoy.ASTNode, structName string) *ahoy.ASTNode {
 	if ast == nil {
 		return nil
 	}
-	
+
 	// Check if this node is the struct we're looking for
 	if ast.Type == ahoy.NODE_STRUCT_DECLARATION && ast.Value == structName {
 		return ast
 	}
-	
+
 	// Recursively search children
 	for _, child := range ast.Children {
 		if result := findStructDefinition(child, structName); result != nil {
 			return result
 		}
 	}
-	
+
 	return nil
 }
 
@@ -852,16 +852,16 @@ func getCharAtPosition(doc *Document, line, character int) rune {
 	if doc == nil || doc.Lines == nil {
 		return 0
 	}
-	
+
 	if line < 0 || line >= len(doc.Lines) {
 		return 0
 	}
-	
+
 	currentLine := doc.Lines[line]
 	if character < 0 || character >= len(currentLine) {
 		return 0
 	}
-	
+
 	return rune(currentLine[character])
 }
 
@@ -871,26 +871,26 @@ func findBlockStart(doc *Document, endLine int) *protocol.Location {
 	if doc == nil || doc.Lines == nil || endLine < 0 || endLine >= len(doc.Lines) {
 		return nil
 	}
-	
+
 	// Stack-based approach: track all block starts and match them with ends
 	// Block start keywords: @, if, loop, switch, when, label, struct, enum
 	// Note: anif and else don't start new blocks, they're part of if chain
 	// Block end: $
-	
+
 	blockDepth := 1 // We're looking for the block that matches *this* specific $
-	
+
 	// Scan backwards from the line BEFORE endLine (skip the $ line itself)
 	for lineNum := endLine - 1; lineNum >= 0; lineNum-- {
 		line := strings.TrimSpace(doc.Lines[lineNum])
-		
+
 		// Count $ on this line (block ends) - these increase depth as we go backwards
 		dollarCount := strings.Count(line, "$")
 		blockDepth += dollarCount
-		
+
 		// Check for block start keywords
 		startsBlock := false
 		shouldContinueToIf := false
-		
+
 		if strings.HasPrefix(line, "@") && strings.Contains(line, ":") {
 			// Function declaration
 			startsBlock = true
@@ -904,9 +904,9 @@ func findBlockStart(doc *Document, endLine int) *protocol.Location {
 			shouldContinueToIf = true
 		} else if strings.HasPrefix(line, "loop ") || strings.HasPrefix(line, "loop:") {
 			startsBlock = true
-		} else if strings.HasPrefix(line, "switch ") && strings.Contains(line, "by") {
+		} else if strings.HasPrefix(line, "switch ") && strings.Contains(line, ":") {
 			startsBlock = true
-		} else if strings.HasPrefix(line, "when ") && strings.Contains(line, "on") {
+		} else if strings.HasPrefix(line, "when ") && strings.Contains(line, ":") {
 			startsBlock = true
 		} else if strings.HasPrefix(line, "struct ") && strings.HasSuffix(line, ":") {
 			startsBlock = true
@@ -916,12 +916,12 @@ func findBlockStart(doc *Document, endLine int) *protocol.Location {
 			// Label (single word followed by :)
 			startsBlock = true
 		}
-		
+
 		// If we hit anif/else, skip it and continue to find the original if
 		if shouldContinueToIf {
 			continue
 		}
-		
+
 		if startsBlock {
 			blockDepth--
 			if blockDepth == 0 {
@@ -936,6 +936,6 @@ func findBlockStart(doc *Document, endLine int) *protocol.Location {
 			}
 		}
 	}
-	
+
 	return nil
 }
