@@ -36,6 +36,28 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 		return reply(ctx, nil, nil)
 	}
 
+	// Check if hovering over $ (block end)
+	charAtPos := getCharAtPosition(doc, int(params.Position.Line), int(params.Position.Character))
+	if charAtPos == '$' {
+		// Find the matching block start
+		if blockStart := findBlockStart(doc, int(params.Position.Line)); blockStart != nil {
+			// Get the line content
+			startLine := int(blockStart.Range.Start.Line)
+			if startLine >= 0 && startLine < len(doc.Lines) {
+				lineContent := strings.TrimSpace(doc.Lines[startLine])
+				hoverText := fmt.Sprintf("**Block End**\n\nCloses block starting at line %d:\n```ahoy\n%s\n```", startLine+1, lineContent)
+				
+				hover := protocol.Hover{
+					Contents: protocol.MarkupContent{
+						Kind:  protocol.Markdown,
+						Value: hoverText,
+					},
+				}
+				return reply(ctx, hover, nil)
+			}
+		}
+	}
+
 	// Get the word at the cursor position
 	word := getWordAtPosition(doc, int(params.Position.Line), int(params.Position.Character))
 	if word == "" {

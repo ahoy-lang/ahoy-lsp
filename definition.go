@@ -281,6 +281,15 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 		return reply(ctx, nil, nil)
 	}
 
+	// Check if cursor is on a $ (block end)
+	charAtPos := getCharAtPosition(doc, int(params.Position.Line), int(params.Position.Character))
+	if charAtPos == '$' {
+		// Find the matching block start
+		if blockStart := findBlockStart(doc, int(params.Position.Line)); blockStart != nil {
+			return reply(ctx, *blockStart, nil)
+		}
+	}
+
 	// Get the word at the cursor position
 	word := getWordAtPosition(doc, int(params.Position.Line), int(params.Position.Character))
 	if word == "" {
@@ -832,6 +841,100 @@ func findStructDefinition(ast *ahoy.ASTNode, structName string) *ahoy.ASTNode {
 	for _, child := range ast.Children {
 		if result := findStructDefinition(child, structName); result != nil {
 			return result
+		}
+	}
+	
+	return nil
+}
+
+// getCharAtPosition gets the single character at the given position
+func getCharAtPosition(doc *Document, line, character int) rune {
+	if doc == nil || doc.Lines == nil {
+		return 0
+	}
+	
+	if line < 0 || line >= len(doc.Lines) {
+		return 0
+	}
+	
+	currentLine := doc.Lines[line]
+	if character < 0 || character >= len(currentLine) {
+		return 0
+	}
+	
+	return rune(currentLine[character])
+}
+
+// findBlockStart finds the start line of the block that ends at the given line
+// Returns a Location pointing to the block start keyword
+func findBlockStart(doc *Document, endLine int) *protocol.Location {
+	if doc == nil || doc.Lines == nil || endLine < 0 || endLine >= len(doc.Lines) {
+		return nil
+	}
+	
+	// Stack-based approach: track all block starts and match them with ends
+	// Block start keywords: @, if, anif, else, loop, switch, when, label
+	// Block end: $
+	
+	blockDepth := 0
+	
+	// Scan backwards from endLine
+	for lineNum := endLine; lineNum >= 0; lineNum-- {
+		line := strings.TrimSpace(doc.Lines[lineNum])
+		
+		// Count $ on this line (block ends)
+		dollarCount := strings.Count(line, "$")
+		if lineNum == endLine {
+			// Start from the current $, so depth starts at 1
+			blockDepth = dollarCount
+		} else {
+			blockDepth += dollarCount
+		}
+		
+		// Check for block start keywords
+		// Function: @ name |params| type:
+		// If: if condition then
+		// Anif: anif condition then
+		// Else: else
+		// Loop: loop ... do
+		// Switch: switch expr by
+		// When: when expr on
+		// Label: label_name:
+		
+		startsBlock := false
+		
+		if strings.HasPrefix(line, "@") && strings.Contains(line, ":") {
+			// Function declaration
+			startsBlock = true
+		} else if strings.HasPrefix(line, "if ") && strings.HasSuffix(line, "then") {
+			startsBlock = true
+		} else if strings.HasPrefix(line, "anif ") && strings.HasSuffix(line, "then") {
+			startsBlock = true
+		} else if line == "else" {
+			startsBlock = true
+		} else if strings.HasPrefix(line, "loop ") && strings.Contains(line, " do") {
+			startsBlock = true
+		} else if strings.HasPrefix(line, "switch ") && strings.HasSuffix(line, "by") {
+			startsBlock = true
+		} else if strings.HasPrefix(line, "when ") && strings.HasSuffix(line, "on") {
+			startsBlock = true
+		} else if !strings.HasPrefix(line, "?") && strings.HasSuffix(line, ":") && !strings.Contains(line, " ") {
+			// Label (single word followed by :)
+			startsBlock = true
+		}
+		
+		if startsBlock {
+			blockDepth--
+			if blockDepth == 0 {
+				// Found the matching block start!
+				return &protocol.Location{
+					URI: doc.URI,
+					Range: protocol.Range{
+						Start: protocol.Position{Line: uint32(lineNum), Character: 0},
+						End:   protocol.Position{Line: uint32(lineNum), Character: uint32(len(doc.Lines[lineNum]))},
+					},
+				}
+			}
 		}
 	}
 	
