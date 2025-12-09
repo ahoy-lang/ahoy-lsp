@@ -106,6 +106,8 @@ func (s *Server) Handle(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc
 		return s.handleDeclaration(ctx, reply, req)
 	case protocol.MethodTextDocumentFormatting:
 		return s.handleFormatting(ctx, reply, req)
+	case "textDocument/inlayHint":
+		return s.handleInlayHint(ctx, reply, req)
 	default:
 		return reply(ctx, nil, jsonrpc2.ErrMethodNotFound)
 	}
@@ -150,7 +152,23 @@ func (s *Server) handleInitialize(ctx context.Context, reply jsonrpc2.Replier, r
 		},
 	}
 
-	return reply(ctx, result, nil)
+	// Marshal to JSON to add custom fields
+	resultJSON, err := json.Marshal(result)
+	if err != nil {
+		return reply(ctx, result, nil)
+	}
+	
+	// Add inlayHintProvider capability
+	var resultMap map[string]interface{}
+	if err := json.Unmarshal(resultJSON, &resultMap); err != nil {
+		return reply(ctx, result, nil)
+	}
+	
+	if capabilities, ok := resultMap["capabilities"].(map[string]interface{}); ok {
+		capabilities["inlayHintProvider"] = true
+	}
+
+	return reply(ctx, resultMap, nil)
 }
 
 func (s *Server) handleDidOpen(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {

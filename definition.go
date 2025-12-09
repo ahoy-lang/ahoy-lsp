@@ -873,54 +873,53 @@ func findBlockStart(doc *Document, endLine int) *protocol.Location {
 	}
 	
 	// Stack-based approach: track all block starts and match them with ends
-	// Block start keywords: @, if, anif, else, loop, switch, when, label
+	// Block start keywords: @, if, loop, switch, when, label, struct, enum
+	// Note: anif and else don't start new blocks, they're part of if chain
 	// Block end: $
 	
-	blockDepth := 0
+	blockDepth := 1 // We're looking for the block that matches *this* specific $
 	
-	// Scan backwards from endLine
-	for lineNum := endLine; lineNum >= 0; lineNum-- {
+	// Scan backwards from the line BEFORE endLine (skip the $ line itself)
+	for lineNum := endLine - 1; lineNum >= 0; lineNum-- {
 		line := strings.TrimSpace(doc.Lines[lineNum])
 		
-		// Count $ on this line (block ends)
+		// Count $ on this line (block ends) - these increase depth as we go backwards
 		dollarCount := strings.Count(line, "$")
-		if lineNum == endLine {
-			// Start from the current $, so depth starts at 1
-			blockDepth = dollarCount
-		} else {
-			blockDepth += dollarCount
-		}
+		blockDepth += dollarCount
 		
 		// Check for block start keywords
-		// Function: @ name |params| type:
-		// If: if condition then
-		// Anif: anif condition then
-		// Else: else
-		// Loop: loop ... do
-		// Switch: switch expr by
-		// When: when expr on
-		// Label: label_name:
-		
 		startsBlock := false
+		shouldContinueToIf := false
 		
 		if strings.HasPrefix(line, "@") && strings.Contains(line, ":") {
 			// Function declaration
 			startsBlock = true
-		} else if strings.HasPrefix(line, "if ") && strings.HasSuffix(line, "then") {
+		} else if strings.HasPrefix(line, "if ") && strings.Contains(line, "then") {
 			startsBlock = true
-		} else if strings.HasPrefix(line, "anif ") && strings.HasSuffix(line, "then") {
+		} else if strings.HasPrefix(line, "anif ") && strings.Contains(line, "then") {
+			// anif is part of if chain - this $ belongs to the original if
+			shouldContinueToIf = true
+		} else if line == "else" || (strings.HasPrefix(line, "else") && strings.HasSuffix(line, ":")) {
+			// else is part of if chain - this $ belongs to the original if
+			shouldContinueToIf = true
+		} else if strings.HasPrefix(line, "loop ") || strings.HasPrefix(line, "loop:") {
 			startsBlock = true
-		} else if line == "else" {
+		} else if strings.HasPrefix(line, "switch ") && strings.Contains(line, "by") {
 			startsBlock = true
-		} else if strings.HasPrefix(line, "loop ") && strings.Contains(line, " do") {
+		} else if strings.HasPrefix(line, "when ") && strings.Contains(line, "on") {
 			startsBlock = true
-		} else if strings.HasPrefix(line, "switch ") && strings.HasSuffix(line, "by") {
+		} else if strings.HasPrefix(line, "struct ") && strings.HasSuffix(line, ":") {
 			startsBlock = true
-		} else if strings.HasPrefix(line, "when ") && strings.HasSuffix(line, "on") {
+		} else if strings.HasPrefix(line, "enum ") && strings.HasSuffix(line, ":") {
 			startsBlock = true
 		} else if !strings.HasPrefix(line, "?") && strings.HasSuffix(line, ":") && !strings.Contains(line, " ") {
 			// Label (single word followed by :)
 			startsBlock = true
+		}
+		
+		// If we hit anif/else, skip it and continue to find the original if
+		if shouldContinueToIf {
+			continue
 		}
 		
 		if startsBlock {
