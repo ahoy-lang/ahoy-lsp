@@ -2415,8 +2415,15 @@ func checkFunctionCallArgumentTypes(doc *Document) []protocol.Diagnostic {
 							continue
 						}
 
-						// Allow int->float implicit conversion
-						if expected == "float" && actual == "int" {
+						// Allow any numeric type to be used interchangeably (int, float, double)
+						// since they auto-cast in C codegen
+						numericTypes := map[string]bool{
+							"int": true, "float": true, "double": true,
+							"i8": true, "i16": true, "i32": true, "i64": true,
+							"u8": true, "u16": true, "u32": true, "u64": true,
+							"f32": true, "f64": true,
+						}
+						if numericTypes[expected] && numericTypes[actual] {
 							continue
 						}
 
