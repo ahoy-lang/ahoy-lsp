@@ -602,9 +602,20 @@ func extractProgramName(ast *ahoy.ASTNode) string {
 
 // loadPackageFiles loads other .ahoy files in the same directory with the same program name
 func (s *Server) loadPackageFiles(doc *Document) {
-	// Get directory from URI
+	// Get directory from URI. A relative filename has no '/', so fall back to
+	// the parent of the absolute path rather than slicing at -1.
 	filePath := string(doc.URI)[7:] // Remove "file://" prefix
-	dir := filePath[:strings.LastIndex(filePath, "/")]
+	slash := strings.LastIndex(filePath, "/")
+	if slash < 0 {
+		if abs, err := filepath.Abs(filePath); err == nil {
+			filePath = abs
+			slash = strings.LastIndex(filePath, "/")
+		}
+	}
+	if slash < 0 {
+		return
+	}
+	dir := filePath[:slash]
 
 	// Read directory
 	entries, err := os.ReadDir(dir)

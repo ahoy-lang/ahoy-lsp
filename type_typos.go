@@ -28,6 +28,7 @@ func checkTypeTypos(doc *Document) []protocol.Diagnostic {
 		"int64", "float64", "uint8", "uint16", "uint32", "uint64",
 		"infer", "generic", "any", // Special types for type inference
 		"object", // Anonymous object type
+		"pool", "job", // Job system handles
 	}
 	for _, t := range builtinTypes {
 		validTypes[t] = true
