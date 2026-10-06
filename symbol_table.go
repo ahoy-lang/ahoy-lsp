@@ -1035,7 +1035,7 @@ func (st *SymbolTable) inferType(node *ahoy.ASTNode) string {
 		funcName := node.Value
 		if sym := st.Lookup(funcName); sym != nil {
 			returnType := sym.Type
-			
+
 			debugLog.Printf("DEBUG inferType: Function %s has return type: %s", funcName, returnType)
 			
 			// If function has infer/generic/any return type, actually infer it
@@ -1088,6 +1088,12 @@ func (st *SymbolTable) inferType(node *ahoy.ASTNode) string {
 			
 			debugLog.Printf("DEBUG inferType: Returning original type: %s", returnType)
 			return returnType
+		}
+		// The callee may be declared later in the file: walkNode visits
+		// functions in source order, so it is not in the table yet. Read the
+		// explicit return type straight from its declaration.
+		if funcNode := findFunctionDeclaration(st.AST, funcName); funcNode != nil {
+			return funcNode.DataType
 		}
 	}
 
@@ -1262,6 +1268,23 @@ func (st *SymbolTable) extractObjectLiteralFields(node *ahoy.ASTNode) map[string
 }
 
 // findLastLine recursively finds the highest line number in a node tree
+// findFunctionDeclaration returns the AST node of a named function, so callers
+// can read its signature even before the symbol table has walked it.
+func findFunctionDeclaration(root *ahoy.ASTNode, name string) *ahoy.ASTNode {
+	if root == nil {
+		return nil
+	}
+	if root.Type == ahoy.NODE_FUNCTION && root.Value == name {
+		return root
+	}
+	for _, child := range root.Children {
+		if found := findFunctionDeclaration(child, name); found != nil {
+			return found
+		}
+	}
+	return nil
+}
+
 func findLastLine(node *ahoy.ASTNode) int {
 if node == nil {
 return 0

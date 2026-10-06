@@ -660,6 +660,15 @@ func (s *Server) loadPackageFiles(doc *Document) {
 		debugLog.Printf("Loaded package file: %s", entry.Name())
 	}
 
+	// Only build a merged table when there really are sibling files. For a
+	// single document the symbol table built for that document is already
+	// correct, and a merged copy used to flatten function scopes (a same-named
+	// local in one function shadowed another regardless of position).
+	if len(doc.PackageFiles) == 0 {
+		doc.PackageSymbols = nil
+		return
+	}
+
 	// Merge symbol tables from all package files
 	doc.PackageSymbols = NewSymbolTable()
 
@@ -678,23 +687,26 @@ func (s *Server) loadPackageFiles(doc *Document) {
 	debugLog.Printf("Merged package symbols from %d files", len(doc.PackageFiles)+1)
 }
 
-// mergeSymbolTable merges symbols from src into dst
+// mergeSymbolTable merges symbols from src into dst. Child scopes are cloned as
+// child scopes of dst: flattening them into dst's symbol map, as this used to,
+// discards function scoping, so a variable declared in one function shadowed a
+// same-named local of another regardless of position.
 func mergeSymbolTable(dst *Scope, src *Scope) {
 	if src == nil || dst == nil {
 		return
 	}
 
-	// Copy all symbols from src to dst
+	// Copy the source scope's own symbols into dst
 	for name, symbol := range src.Symbols {
 		existingSymbol, exists := dst.Symbols[name]
-		
+
 		// For functions, we want to detect duplicates, so we keep the FIRST one
 		// but log when we encounter duplicates for debugging
 		if exists {
 			// If both are functions and from different files/lines, this is a duplicate
 			if symbol.Kind == SymbolKindFunction && existingSymbol.Kind == SymbolKindFunction {
 				if symbol.File != existingSymbol.File || symbol.Line != existingSymbol.Line {
-					debugLog.Printf("[MergeSymbols] Duplicate function %s found: existing=%s:%d, new=%s:%d", 
+					debugLog.Printf("[MergeSymbols] Duplicate function %s found: existing=%s:%d, new=%s:%d",
 						name, existingSymbol.File, existingSymbol.Line, symbol.File, symbol.Line)
 					// Keep the existing one (from current file), but we've logged the duplicate
 				}
@@ -706,8 +718,19 @@ func mergeSymbolTable(dst *Scope, src *Scope) {
 		}
 	}
 
-	// Recursively merge child scopes
+	// Clone child scopes, keeping their line ranges so lookups by position can
+	// still find the innermost scope.
 	for _, srcChild := range src.Children {
-		mergeSymbolTable(dst, srcChild)
+		if srcChild == nil {
+			continue
+		}
+		child := &Scope{
+			Parent:    dst,
+			Symbols:   make(map[string]*Symbol),
+			StartLine: srcChild.StartLine,
+			EndLine:   srcChild.EndLine,
+		}
+		dst.Children = append(dst.Children, child)
+		mergeSymbolTable(child, srcChild)
 	}
 }

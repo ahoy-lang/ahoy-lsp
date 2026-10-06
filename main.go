@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"runtime"
 	"runtime/debug"
+	"strings"
 	"time"
 
 	"ahoy"
@@ -76,6 +78,43 @@ func main() {
 	debugLog.Println("Shutting down cleanly")
 }
 
+// siblingDeclaredNames returns the top-level names declared by the other files
+// of the same program in the same directory. It returns nil when the file is
+// not part of a multi-file program.
+func siblingDeclaredNames(filename string, ast *ahoy.ASTNode) []string {
+	programName := extractProgramName(ast)
+	if programName == "" {
+		return nil
+	}
+
+	dir := filepath.Dir(filename)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+
+	var names []string
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".ahoy") {
+			continue
+		}
+		path := filepath.Join(dir, entry.Name())
+		if path == filename {
+			continue
+		}
+		other, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		otherAst, _ := ahoy.ParseLintWithPath(ahoy.Tokenize(string(other)), path)
+		if otherAst == nil || extractProgramName(otherAst) != programName {
+			continue
+		}
+		names = append(names, ahoy.DeclaredNames(otherAst)...)
+	}
+	return names
+}
+
 func runValidate(filename string) {
 	// Read file
 	content, err := os.ReadFile(filename)
@@ -88,6 +127,14 @@ func runValidate(filename string) {
 	tokens := ahoy.Tokenize(string(content))
 	// Use ParseLintWithPath to support relative imports
 	ast, parseErrors := ahoy.ParseLintWithPath(tokens, filename)
+
+	// A file that belongs to a multi-file program must be validated with its
+	// siblings' names in scope, or every call to a function declared in a
+	// sibling file is reported as undefined. The compiler's -lint does the
+	// same; ParseLintWithPathInProgram is the entry point for it.
+	if names := siblingDeclaredNames(filename, ast); len(names) > 0 {
+		ast, parseErrors = ahoy.ParseLintWithPathInProgram(tokens, filename, names)
+	}
 
 	// Check syntax errors
 	if len(parseErrors) > 0 {
