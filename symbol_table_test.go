@@ -139,3 +139,28 @@ func TestPackageSymbolsResolveSiblingFunctions(t *testing.T) {
 		t.Errorf("sibling function reported undefined: %v", diags)
 	}
 }
+
+// A constant declared in main is emitted as a global constant, so other
+// functions can reference it. The symbol table has to agree, or the editor
+// reports every such reference as undeclared.
+func TestMainConstantIsGlobal(t *testing.T) {
+	const src = `program p
+
+@ helper ::|| int:
+	return OFFSET + 1
+$
+
+@ main :: || void:
+	OFFSET: int = 4
+	print|helper||
+$
+`
+	st := buildTableFor(t, src)
+	sym := st.GlobalScope.LookupLocal("OFFSET")
+	if sym == nil {
+		t.Fatal("constant declared in main is not in the global scope")
+	}
+	if sym.Kind != SymbolKindConstant {
+		t.Errorf("OFFSET kind = %v, want constant", sym.Kind)
+	}
+}

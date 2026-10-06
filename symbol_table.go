@@ -170,6 +170,11 @@ type SymbolTable struct {
 	InferredParams  map[string][]string // function name -> inferred parameter types
 	InferredReturns map[string][]string // function name -> inferred return types
 	FilePath        string              // File path this symbol table was built from
+
+	// currentFunction is the function whose body is being walked. The code
+	// generator emits constants declared in main at global scope, so their
+	// symbols belong in GlobalScope rather than main's scope.
+	currentFunction string
 }
 
 func NewSymbolTable() *SymbolTable {
@@ -373,6 +378,8 @@ func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
 	case ahoy.NODE_FUNCTION:
 		// Add function to symbol table
 		funcName := node.Value
+		savedFunction := st.currentFunction
+		st.currentFunction = funcName
 		
 		// Get return type - use InferredReturns if available, otherwise use node.DataType
 		returnType := node.DataType
@@ -473,6 +480,7 @@ func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
 		}
 
 		st.ExitScope()
+		st.currentFunction = savedFunction
 
 	case ahoy.NODE_VARIABLE_DECLARATION, ahoy.NODE_ASSIGNMENT:
 		varName := node.Value
@@ -828,7 +836,14 @@ func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
 			Column: 0,
 			File:   st.FilePath,
 		}
-		st.AddSymbol(symbol)
+		// A constant declared in main is emitted as a global constant, so every
+		// function can reference it. Add it to the global scope so the
+		// undeclared-identifier check agrees with the generated C.
+		if st.currentFunction == "main" || st.currentFunction == "ahoy_main" {
+			st.GlobalScope.AddSymbol(symbol)
+		} else {
+			st.AddSymbol(symbol)
+		}
 
 	case ahoy.NODE_IF_STATEMENT, ahoy.NODE_WHILE_LOOP, ahoy.NODE_FOR_LOOP,
 		ahoy.NODE_FOR_RANGE_LOOP, ahoy.NODE_FOR_COUNT_LOOP,
