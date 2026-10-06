@@ -121,8 +121,7 @@ func checkTypeTypos(doc *Document) []protocol.Diagnostic {
 			// Extract base type from array[T] or dict<K,V>
 			baseType := extractBaseType(typeStr)
 			
-			if baseType != "" && !validTypes[baseType] {
-				// Find closest match
+			if baseType != "" && !ahoy.IsFunctionType(baseType) && !validTypes[baseType] {
 				closestMatch := findClosestType(baseType, validTypes)
 				var message string
 				if closestMatch != "" {
@@ -149,7 +148,7 @@ func checkTypeTypos(doc *Document) []protocol.Diagnostic {
 			for _, param := range params.Children {
 				if param.DataType != "" {
 					baseType := extractBaseType(param.DataType)
-					if baseType != "" && !validTypes[baseType] {
+					if baseType != "" && !ahoy.IsFunctionType(param.DataType) && !validTypes[baseType] {
 						closestMatch := findClosestType(baseType, validTypes)
 						var message string
 						if closestMatch != "" {
