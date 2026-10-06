@@ -297,6 +297,7 @@ func (s *Server) handleDidOpen(ctx context.Context, reply jsonrpc2.Replier, req 
 			debugLog.Printf("Program name: %s, loading package files...", doc.ProgramName)
 			s.loadPackageFiles(doc)
 		}
+		s.revalidateWithProgramNames(doc)
 	}
 
 	s.mu.Lock()
@@ -437,6 +438,7 @@ func (s *Server) handleDidChange(ctx context.Context, reply jsonrpc2.Replier, re
 			if doc.ProgramName != "" {
 				s.loadPackageFiles(doc)
 			}
+			s.revalidateWithProgramNames(doc)
 		} else {
 			doc.SymbolTable = NewSymbolTable()
 			doc.CHeaders = make(map[string]*ahoy.CHeaderInfo)
@@ -600,11 +602,35 @@ func extractProgramName(ast *ahoy.ASTNode) string {
 	return ""
 }
 
+// revalidateWithProgramNames re-runs the semantic checks with the names the
+// program's other files declare.
+//
+// The initial parse uses ParseLintWithPath, which knows only this file, so a
+// function or constant declared in a sibling file would be reported as
+// undefined. loadPackageFiles has already parsed those siblings; passing their
+// declared names to ParseLintWithPathInProgram is the same thing the
+// compiler's -lint does for a multi-file program.
+func (s *Server) revalidateWithProgramNames(doc *Document) {
+	if doc == nil || doc.AST == nil || len(doc.Tokens) == 0 || len(doc.PackageFiles) == 0 {
+		return
+	}
+
+	names := ahoy.DeclaredNames(doc.AST)
+	for _, pkgFile := range doc.PackageFiles {
+		if pkgFile.AST != nil {
+			names = append(names, ahoy.DeclaredNames(pkgFile.AST)...)
+		}
+	}
+
+	filePath := strings.TrimPrefix(string(doc.URI), "file://")
+	_, doc.Errors = ahoy.ParseLintWithPathInProgram(doc.Tokens, filePath, names)
+}
+
 // loadPackageFiles loads other .ahoy files in the same directory with the same program name
 func (s *Server) loadPackageFiles(doc *Document) {
 	// Get directory from URI. A relative filename has no '/', so fall back to
 	// the parent of the absolute path rather than slicing at -1.
-	filePath := string(doc.URI)[7:] // Remove "file://" prefix
+	filePath := strings.TrimPrefix(string(doc.URI), "file://")
 	slash := strings.LastIndex(filePath, "/")
 	if slash < 0 {
 		if abs, err := filepath.Abs(filePath); err == nil {
@@ -616,6 +642,7 @@ func (s *Server) loadPackageFiles(doc *Document) {
 		return
 	}
 	dir := filePath[:slash]
+	selfPath := filepath.Clean(filePath)
 
 	// Read directory
 	entries, err := os.ReadDir(dir)
@@ -632,15 +659,18 @@ func (s *Server) loadPackageFiles(doc *Document) {
 			continue
 		}
 
-		fileURI := uri.URI("file://" + dir + "/" + entry.Name())
-
-		// Skip the current document
-		if fileURI == doc.URI {
+		// filepath.Join, not string concatenation, and compare resolved paths
+		// rather than URIs: "file://./main.ahoy" and "file://main.ahoy" both name
+		// the current document, and a mismatch loaded the file as its own sibling
+		// and reported every function as defined twice.
+		siblingPath := filepath.Join(dir, entry.Name())
+		if filepath.Clean(siblingPath) == selfPath {
 			continue
 		}
+		fileURI := uri.URI("file://" + siblingPath)
 
 		// Read file content
-		content, err := os.ReadFile(dir + "/" + entry.Name())
+		content, err := os.ReadFile(siblingPath)
 		if err != nil {
 			debugLog.Printf("Error reading file %s: %v", entry.Name(), err)
 			continue
@@ -648,8 +678,7 @@ func (s *Server) loadPackageFiles(doc *Document) {
 
 		// Parse file
 		tokens := ahoy.Tokenize(string(content))
-		filePath := dir + "/" + entry.Name()
-		ast, _ := ahoy.ParseLintWithPath(tokens, filePath)
+		ast, _ := ahoy.ParseLintWithPath(tokens, siblingPath)
 
 		// Check if it has the same program name
 		progName := extractProgramName(ast)
