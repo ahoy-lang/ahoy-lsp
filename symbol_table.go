@@ -257,22 +257,35 @@ func (st *SymbolTable) findScopeAtPosition(scope *Scope, line int) *Scope {
 	if scope == nil {
 		return nil
 	}
-	
-	// Check child scopes first (innermost)
+
+	// Choose the child with the greatest start line that contains the position.
+	// Ranges can overlap: a function with an empty body has no line of its own
+	// to end on, so its scope is left open to the end of the file (999999) and
+	// a first-match walk handed every later position that empty scope.
+	var best *Scope
 	for _, child := range scope.Children {
-		if child != nil && line >= child.StartLine && line <= child.EndLine {
-			if innerScope := st.findScopeAtPosition(child, line); innerScope != nil {
-				return innerScope
-			}
-			return child
+		if child == nil || line < child.StartLine {
+			continue
+		}
+		if child.EndLine != 0 && line > child.EndLine {
+			continue
+		}
+		if best == nil || child.StartLine > best.StartLine {
+			best = child
 		}
 	}
-	
+	if best != nil {
+		if inner := st.findScopeAtPosition(best, line); inner != nil {
+			return inner
+		}
+		return best
+	}
+
 	// Return current scope if position is within it
 	if line >= scope.StartLine && (scope.EndLine == 0 || line <= scope.EndLine) {
 		return scope
 	}
-	
+
 	return nil
 }
 

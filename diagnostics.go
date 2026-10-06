@@ -1249,8 +1249,18 @@ func checkUndefinedFunctions(doc *Document) []protocol.Diagnostic {
 			// Check if function exists (built-in or user-defined or C import)
 			if !isBuiltinFunction(funcName) {
 				// Look the name up at the call site: a function-typed local or
-				// parameter (f: fn(int)->int) is callable too.
+				// parameter (f: fn(int)->int) is callable too. The merged package
+				// table can carry a sibling file's scope whose line range overlaps
+				// this document's, so a failed position lookup falls back to the
+				// document's own table (which has the real function scopes) and
+				// then to a plain global lookup.
 				sym := symbolTable.LookupAtPosition(funcName, node.Line, node.Column)
+				if sym == nil && doc.SymbolTable != nil && doc.SymbolTable != symbolTable {
+					sym = doc.SymbolTable.LookupAtPosition(funcName, node.Line, node.Column)
+				}
+				if sym == nil && symbolTable.GlobalScope != nil {
+					sym = symbolTable.GlobalScope.Lookup(funcName)
+				}
 				isUserDefined := sym != nil && (sym.Kind == SymbolKindFunction || ahoy.IsFunctionType(sym.Type))
 
 				// Check if it's a C function (global import)
