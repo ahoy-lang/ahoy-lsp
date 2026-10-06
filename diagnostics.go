@@ -1161,6 +1161,7 @@ var builtinFunctions = []string{
 	"string",
 	"len",
 	"length",
+	"jobs",
 	"read_json",
 	"write_json",
 	"ahoy_json_string",
