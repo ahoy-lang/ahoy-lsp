@@ -267,14 +267,17 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 		if beforePrefixType == "string" {
 			// String literal methods
 			items = addStringMethods(items, prefix)
+			items = addUserMethods(items, doc, "string", prefix, false)
 			return reply(ctx, protocol.CompletionList{IsIncomplete: false, Items: items}, nil)
 		} else if beforePrefixType == "array" {
 			// Array literal methods
 			items = addArrayMethods(items, prefix)
+			items = addUserMethods(items, doc, "array", prefix, false)
 			return reply(ctx, protocol.CompletionList{IsIncomplete: false, Items: items}, nil)
 		} else if beforePrefixType == "dict" {
 			// Dict literal methods
 			items = addDictMethods(items, prefix)
+			items = addUserMethods(items, doc, "dict", prefix, false)
 			return reply(ctx, protocol.CompletionList{IsIncomplete: false, Items: items}, nil)
 		}
 
@@ -303,18 +306,21 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 				// Check if it's a string type for string methods
 				if sym.Type == "string" {
 					items = addStringMethods(items, prefix)
+					items = addUserMethods(items, doc, sym.Type, prefix, false)
 					return reply(ctx, protocol.CompletionList{IsIncomplete: false, Items: items}, nil)
 				}
 
 				// Check if it's an array type for array methods (including typed arrays like array[string])
 				if sym.Type == "array" || strings.HasPrefix(sym.Type, "array[") || strings.HasPrefix(sym.Type, "array<") {
 					items = addArrayMethods(items, prefix)
+					items = addUserMethods(items, doc, sym.Type, prefix, false)
 					return reply(ctx, protocol.CompletionList{IsIncomplete: false, Items: items}, nil)
 				}
 
 				// Check if it's a dict type for dictionary methods (including typed dicts like dict<string,string>)
 				if sym.Type == "dict" || strings.HasPrefix(sym.Type, "dict<") || strings.HasPrefix(sym.Type, "dict[") {
 					items = addDictMethods(items, prefix)
+					items = addUserMethods(items, doc, sym.Type, prefix, false)
 					return reply(ctx, protocol.CompletionList{IsIncomplete: false, Items: items}, nil)
 				}
 
@@ -386,14 +392,17 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 								})
 							}
 						}
-
-						// Return early with struct field completions
-						result := protocol.CompletionList{
-							IsIncomplete: false,
-							Items:        items,
-						}
-						return reply(ctx, result, nil)
 					}
+
+					// User-defined methods for the variable's type.
+					items = addUserMethods(items, doc, sym.Type, prefix, false)
+
+					// Return with struct field + method completions
+					result := protocol.CompletionList{
+						IsIncomplete: false,
+						Items:        items,
+					}
+					return reply(ctx, result, nil)
 				}
 
 				// Check if it's a struct type name (for static field access: StructType.#field and nested types)
@@ -424,14 +433,17 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 								}
 							}
 						}
-
-						// Return with static field and nested type completions
-						result := protocol.CompletionList{
-							IsIncomplete: false,
-							Items:        items,
-						}
-						return reply(ctx, result, nil)
 					}
+
+					// Associated functions (@ Type.name) complete on the type.
+					items = addUserMethods(items, doc, sym.Name, prefix, true)
+
+					// Return with static field, nested type and associated completions
+					result := protocol.CompletionList{
+						IsIncomplete: false,
+						Items:        items,
+					}
+					return reply(ctx, result, nil)
 				}
 			}
 		}
@@ -844,6 +856,81 @@ func addDictMethods(items []protocol.CompletionItem, prefix string) []protocol.C
 				InsertText:    method.label + method.params,
 			})
 		}
+	}
+	return items
+}
+
+// addUserMethods appends user-defined methods for recvType, collected from the
+// current document and its package files. Labels already present are skipped,
+// so an explicit user method replaces a same-named builtin in the list. When
+// associatedOnly is set, only @ T.name functions are listed (for Type.
+// completion); otherwise only receiver methods.
+func addUserMethods(items []protocol.CompletionItem, doc *Document, recvType string, prefix string, associatedOnly bool) []protocol.CompletionItem {
+	recvType = ahoy.NormalizeReceiverType(recvType)
+	if recvType == "" {
+		return items
+	}
+	asts := []*ahoy.ASTNode{}
+	if doc.AST != nil {
+		asts = append(asts, doc.AST)
+	}
+	for _, pf := range doc.PackageFiles {
+		if pf.AST != nil {
+			asts = append(asts, pf.AST)
+		}
+	}
+	if len(asts) == 0 {
+		return items
+	}
+	present := map[string]bool{}
+	for _, it := range items {
+		present[it.Label] = true
+	}
+	for _, e := range ahoy.CollectMethods(asts...)[recvType] {
+		if e == nil || e.Info == nil || e.Info.Associated != associatedOnly {
+			continue
+		}
+		if prefix != "" && !strings.HasPrefix(e.Info.Name, prefix) {
+			continue
+		}
+		if present[e.Info.Name] {
+			continue
+		}
+		present[e.Info.Name] = true
+		// Signature detail skips the receiver (parameter zero) for methods.
+		params := []string{}
+		if e.Sig != nil {
+			for i, p := range e.Sig.Parameters {
+				if i == 0 && !e.Info.Associated {
+					continue
+				}
+				ps := p.Name
+				if p.Type != "" && p.Type != "any" && p.Type != "generic" {
+					ps += ":" + p.Type
+				}
+				params = append(params, ps)
+			}
+		}
+		detail := e.Info.Name + "(" + strings.Join(params, ", ") + ")"
+		if e.Sig != nil && len(e.Sig.ReturnTypes) > 0 && e.Sig.ReturnTypes[0] != "" && e.Sig.ReturnTypes[0] != "void" {
+			detail += " -> " + e.Sig.ReturnTypes[0]
+		}
+		// InsertText carries the pipe skeleton in house style (|a, b|, ||).
+		names := []string{}
+		if e.Sig != nil {
+			for i, p := range e.Sig.Parameters {
+				if i == 0 && !e.Info.Associated {
+					continue
+				}
+				names = append(names, p.Name)
+			}
+		}
+		items = append(items, protocol.CompletionItem{
+			Label:      e.Info.Name,
+			Kind:       protocol.CompletionItemKindMethod,
+			Detail:     recvType + "." + detail,
+			InsertText: e.Info.Name + "|" + strings.Join(names, ", ") + "|",
+		})
 	}
 	return items
 }

@@ -109,6 +109,39 @@ func checkTypeTypos(doc *Document) []protocol.Diagnostic {
 		}
 	}
 
+	// Also collect C types from the program's other files. The compiler sees
+	// every file's headers at codegen, so a type imported by a sibling (e.g.
+	// raylib.h in another engine file) is visible program-wide. Header parses
+	// are memoized, so this costs one AST walk per file.
+	if doc.PackageFiles != nil {
+		for _, pkgFile := range doc.PackageFiles {
+			if pkgFile.AST == nil {
+				continue
+			}
+			sibHeaders, sibGlobal := extractCHeaderInfoWithURI(pkgFile.AST, pkgFile.URI)
+			if sibGlobal != nil {
+				for typeName := range sibGlobal.Structs {
+					validTypes[typeName] = true
+					validTypes[strings.ToLower(typeName)] = true
+				}
+				for typeName := range sibGlobal.Enums {
+					validTypes[typeName] = true
+					validTypes[strings.ToLower(typeName)] = true
+				}
+			}
+			for _, cHeader := range sibHeaders {
+				for typeName := range cHeader.Structs {
+					validTypes[typeName] = true
+					validTypes[strings.ToLower(typeName)] = true
+				}
+				for typeName := range cHeader.Enums {
+					validTypes[typeName] = true
+					validTypes[strings.ToLower(typeName)] = true
+				}
+			}
+		}
+	}
+
 	// Check for type typos in variable declarations
 	var checkNode func(node *ahoy.ASTNode)
 	checkNode = func(node *ahoy.ASTNode) {

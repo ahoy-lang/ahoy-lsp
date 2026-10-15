@@ -2505,7 +2505,12 @@ func checkFunctionCallArgumentTypes(doc *Document) []protocol.Diagnostic {
 									Character: endChar,
 								},
 							},
-							Severity: protocol.DiagnosticSeverityError,
+							// The compiler does not check argument types (only arity),
+							// and this check infers from a different type universe
+							// (C spellings vs ahoy names) with best-effort inference,
+							// so a mismatch here is advisory: code that compiles must
+							// not get red squiggles from it.
+							Severity: protocol.DiagnosticSeverityWarning,
 							Source:   "ahoy",
 							Message:  message,
 							Code:     "argument-type-mismatch",

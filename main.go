@@ -81,19 +81,20 @@ func main() {
 // siblingDeclaredNames returns the top-level names declared by the other files
 // of the same program in the same directory. It returns nil when the file is
 // not part of a multi-file program.
-func siblingDeclaredNames(filename string, ast *ahoy.ASTNode) []string {
+func siblingDeclaredNames(filename string, ast *ahoy.ASTNode) ([]string, []*ahoy.ASTNode) {
 	programName := extractProgramName(ast)
 	if programName == "" {
-		return nil
+		return nil, nil
 	}
 
 	dir := filepath.Dir(filename)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return nil
+		return nil, nil
 	}
 
 	var names []string
+	var methodASTs []*ahoy.ASTNode
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".ahoy") {
 			continue
@@ -111,8 +112,9 @@ func siblingDeclaredNames(filename string, ast *ahoy.ASTNode) []string {
 			continue
 		}
 		names = append(names, ahoy.DeclaredNames(otherAst)...)
+		methodASTs = append(methodASTs, otherAst)
 	}
-	return names
+	return names, methodASTs
 }
 
 func runValidate(filename string) {
@@ -132,13 +134,20 @@ func runValidate(filename string) {
 	// siblings' names in scope, or every call to a function declared in a
 	// sibling file is reported as undefined. The compiler's -lint does the
 	// same; ParseLintWithPathInProgram is the entry point for it.
-	if names := siblingDeclaredNames(filename, ast); len(names) > 0 {
-		ast, parseErrors = ahoy.ParseLintWithPathInProgram(tokens, filename, names)
+	if names, methodASTs := siblingDeclaredNames(filename, ast); len(names) > 0 {
+		ast, parseErrors = ahoy.ParseLintWithPathInProgram(tokens, filename, names, ahoy.CollectMethods(methodASTs...))
 	}
 
-	// Check syntax errors
-	if len(parseErrors) > 0 {
-		fmt.Printf("Found %d syntax error(s) in %s:\n", len(parseErrors), filename)
+	// Check syntax errors. Warnings print but do not fail validation: only
+	// fatal diagnostics exit nonzero.
+	fatals := 0
+	for _, err := range parseErrors {
+		if !err.IsWarning() {
+			fatals++
+		}
+	}
+	if fatals > 0 {
+		fmt.Printf("Found %d syntax error(s) in %s:\n", fatals, filename)
 		for _, err := range parseErrors {
 			fmt.Printf("  Line %d, Column %d: %s\n", err.Line, err.Column, err.Message)
 		}

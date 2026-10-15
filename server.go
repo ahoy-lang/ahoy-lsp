@@ -616,14 +616,19 @@ func (s *Server) revalidateWithProgramNames(doc *Document) {
 	}
 
 	names := ahoy.DeclaredNames(doc.AST)
+	methodASTs := []*ahoy.ASTNode{}
+	if doc.AST != nil {
+		methodASTs = append(methodASTs, doc.AST)
+	}
 	for _, pkgFile := range doc.PackageFiles {
 		if pkgFile.AST != nil {
 			names = append(names, ahoy.DeclaredNames(pkgFile.AST)...)
+			methodASTs = append(methodASTs, pkgFile.AST)
 		}
 	}
 
 	filePath := strings.TrimPrefix(string(doc.URI), "file://")
-	_, doc.Errors = ahoy.ParseLintWithPathInProgram(doc.Tokens, filePath, names)
+	_, doc.Errors = ahoy.ParseLintWithPathInProgram(doc.Tokens, filePath, names, ahoy.CollectMethods(methodASTs...))
 }
 
 // loadPackageFiles loads other .ahoy files in the same directory with the same program name
