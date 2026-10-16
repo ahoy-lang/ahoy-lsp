@@ -1221,6 +1221,10 @@ func checkUndefinedFunctions(doc *Document) []protocol.Diagnostic {
 		if sym.Kind == SymbolKindFunction {
 			availableFuncs = append(availableFuncs, sym.Name)
 		}
+		// Distinct type names convert with one argument: Name(value).
+		if sym.Kind == SymbolKindDistinct {
+			availableFuncs = append(availableFuncs, sym.Name)
+		}
 	}
 
 	// Add C header functions (global imports - snake_case names)
@@ -1261,7 +1265,7 @@ func checkUndefinedFunctions(doc *Document) []protocol.Diagnostic {
 				if sym == nil && symbolTable.GlobalScope != nil {
 					sym = symbolTable.GlobalScope.Lookup(funcName)
 				}
-				isUserDefined := sym != nil && (sym.Kind == SymbolKindFunction || ahoy.IsFunctionType(sym.Type))
+				isUserDefined := sym != nil && (sym.Kind == SymbolKindFunction || sym.Kind == SymbolKindDistinct || ahoy.IsFunctionType(sym.Type))
 
 				// Check if it's a C function (global import)
 				isCFunction := false

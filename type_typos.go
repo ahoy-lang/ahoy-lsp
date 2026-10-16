@@ -61,6 +61,9 @@ func checkTypeTypos(doc *Document) []protocol.Diagnostic {
 		} else if node.Type == ahoy.NODE_ALIAS_DECLARATION {
 			// Add type aliases
 			validTypes[node.Value] = true
+		} else if node.Type == ahoy.NODE_DISTINCT_DECLARATION {
+			// Add distinct newtypes
+			validTypes[node.Value] = true
 		} else if node.Type == ahoy.NODE_ENUM_DECLARATION {
 			// Add enum types
 			validTypes[node.Value] = true

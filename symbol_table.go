@@ -51,6 +51,7 @@ const (
 	SymbolKindCFunction  // C function from imported header
 	SymbolKindCEnum      // C enum from imported header
 	SymbolKindCDefine    // C #define from imported header
+	SymbolKindDistinct   // Distinct newtype (same layout as base, checked strictly)
 )
 
 // Scope represents a lexical scope
@@ -644,6 +645,17 @@ func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
 			Column: 0,
 		}
 		st.AddSymbol(symbol)
+
+	case ahoy.NODE_DISTINCT_DECLARATION:
+		distinctName := node.Value
+		dsymbol := &Symbol{
+			Name:   distinctName,
+			Kind:   SymbolKindDistinct,
+			Type:   node.DataType, // The base type
+				Line:   node.Line,
+				Column: 0,
+			}
+		st.AddSymbol(dsymbol)
 
 	case ahoy.NODE_UNION_DECLARATION:
 		unionName := node.Value
