@@ -25,7 +25,10 @@ func checkTypeTypos(doc *Document) []protocol.Diagnostic {
 	builtinTypes := []string{
 		"int", "float", "bool", "char", "string", "void",
 		"array", "dict", "HashMap", "AhoyArray",
+		"buffer", "f32", "double", // flat POD buffers (S3 7.3)
 		"int64", "float64", "uint8", "uint16", "uint32", "uint64",
+		// fixed-width integer types (i8..i64, u8..u64)
+		"i8", "u8", "i16", "u16", "i32", "u32", "i64", "u64",
 		"infer", "generic", "any", // Special types for type inference
 		"object", // Anonymous object type
 		"pool", "job", // Job system handles
@@ -451,8 +454,8 @@ func findClosestProperty(typo string, validProps map[string]bool) string {
 
 // extractBaseType extracts base type from complex types like array[string] or dict<int,string>
 func extractBaseType(typeStr string) string {
-	// Handle array[T]
-	if strings.HasPrefix(typeStr, "array[") {
+	// Handle array[T] and buffer[f32]
+	if strings.HasPrefix(typeStr, "array[") || strings.HasPrefix(typeStr, "buffer[") {
 		// Extract the type inside brackets
 		start := strings.Index(typeStr, "[")
 		end := strings.LastIndex(typeStr, "]")

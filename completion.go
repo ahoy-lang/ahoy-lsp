@@ -472,6 +472,8 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 		"true", "false",
 		"enum", "struct", "type",
 		"int", "float", "string", "bool", "dict", "vector2", "color",
+		"f32", "buffer",
+		"i8", "u8", "i16", "u16", "i32", "u32", "i64", "u64",
 	}
 
 	// Add keyword completions (only if not dot completion)
