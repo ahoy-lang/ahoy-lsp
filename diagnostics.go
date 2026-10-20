@@ -1173,6 +1173,10 @@ var builtinFunctions = []string{
 	"ahoy_json_bool",
 	"ahoy_json_get",
 	"ahoy_json_get_index",
+	// the math and geometry builtins
+	"abs", "min", "max", "clamp", "lerp", "sign", "floor", "ceil",
+	"round", "sqrt", "pow", "hypot", "mod",
+	"rect_contains", "rect_intersects",
 }
 
 // isBuiltinFunction checks if a function name is a built-in function
