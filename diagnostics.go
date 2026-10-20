@@ -1284,7 +1284,11 @@ func checkUndefinedFunctions(doc *Document) []protocol.Diagnostic {
 				// Also check namespaced C functions (e.g., rl.function_name)
 				// These would come through as method calls, but we'll handle them separately
 
-				if !isUserDefined && !isCFunction {
+				// A struct allocator: ahoy_alloc_NodeVis(). The compiler
+				// emits one for every struct, so it is always callable.
+				isStructAllocator := strings.HasPrefix(funcName, ahoy.AllocPrefix)
+
+				if !isUserDefined && !isCFunction && !isStructAllocator {
 					// Function not found - find similar function
 					similarFunc, distance := findSimilarFunction(funcName, availableFuncs)
 
