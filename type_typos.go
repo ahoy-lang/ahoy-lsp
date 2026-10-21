@@ -27,6 +27,7 @@ func checkTypeTypos(doc *Document) []protocol.Diagnostic {
 		"array", "dict", "HashMap", "AhoyArray",
 		"buffer", "grow", "f32", "double", // flat POD buffers (S3 7.3)
 	"to_bytes", "from_bytes", "from_bytes_int", "from_bytes_ok", // verified-load serialization
+	"sin", "cos", "tan", "asin", "acos", "atan", "atan2", "fmod", "ln", "exp", "time_now", // math + clock
 		"int64", "float64", "uint8", "uint16", "uint32", "uint64",
 		// fixed-width integer types (i8..i64, u8..u64)
 		"i8", "u8", "i16", "u16", "i32", "u32", "i64", "u64",

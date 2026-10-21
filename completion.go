@@ -473,6 +473,7 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 		"enum", "struct", "type",
 		"int", "float", "string", "bool", "dict", "vector2", "color",
 		"f32", "buffer", "buffer_int", "grow", "to_bytes", "from_bytes", "from_bytes_int", "from_bytes_ok",
+		"sin", "cos", "tan", "asin", "acos", "atan", "atan2", "fmod", "ln", "exp", "time_now",
 		"i8", "u8", "i16", "u16", "i32", "u32", "i64", "u64",
 	}
 
@@ -802,6 +803,11 @@ func addArrayMethods(items []protocol.CompletionItem, prefix string) []protocol.
 		{"sort", "Sort array", "Sorts the array in place", "||"},
 		{"reverse", "Reverse array", "Reverses the array in place", "||"},
 		{"shuffle", "Shuffle array", "Randomly shuffles the array in place", "||"},
+		{"index_of", "Index of element", "Returns index of element or -1", "|element|"},
+		{"reduce", "Reduce array", "Folds elements with a function value", "|fn, init|"},
+		{"insert", "Insert element", "Inserts an element at an index", "|index, element|"},
+		{"append", "Append element", "Appends an element (push alias)", "|element|"},
+		{"erase", "Erase element", "Removes the element at an index", "|index|"},
 		{"pick", "Pick random element", "Returns a random element from the array", "||"},
 		{"contains", "Check if contains", "Returns true if array contains element", "|element|"},
 		{"has", "Check if has element", "Returns true if array has the element", "|element|"},

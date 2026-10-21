@@ -518,7 +518,8 @@ func getValidArrayMethods() []string {
 	return []string{
 		"length", "push", "pop", "sort", "reverse", "contains",
 		"find", "filter", "map", "join", "slice", "sum", "has",
-		"fill", "shuffle", "pick",
+		"fill", "shuffle", "pick", "index_of", "reduce", "insert",
+		"append", "erase",
 	}
 }
 
@@ -1163,6 +1164,8 @@ var builtinFunctions = []string{
 	"buffer_int",
 	"grow",
 	"to_bytes", "from_bytes", "from_bytes_int", "from_bytes_ok",
+	"sin", "cos", "tan", "asin", "acos", "atan", "atan2",
+	"fmod", "ln", "exp", "time_now",
 	"char",
 	"string",
 	"len",
