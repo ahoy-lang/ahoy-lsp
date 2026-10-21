@@ -1160,6 +1160,8 @@ var builtinFunctions = []string{
 	"f32",
 	"i8", "u8", "i16", "u16", "i32", "u32", "i64", "u64",
 	"buffer",
+	"grow",
+	"to_bytes", "from_bytes", "from_bytes_ok",
 	"char",
 	"string",
 	"len",
