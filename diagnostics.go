@@ -71,6 +71,7 @@ func collectDiagnostics(doc *Document) []protocol.Diagnostic {
 
 			// Check function call argument types
 			argTypeDiags := checkFunctionCallArgumentTypes(doc)
+			diagnostics = append(diagnostics, argTypeDiags...)
 			// Check defer free + return conflicts
 			deferReturnDiags := checkDeferFreeReturns(doc)
 			diagnostics = append(diagnostics, deferReturnDiags...)
@@ -99,7 +100,10 @@ func collectDiagnostics(doc *Document) []protocol.Diagnostic {
 			typeTypoDiags := checkTypeTypos(doc)
 			diagnostics = append(diagnostics, typeTypoDiags...)
 
-			diagnostics = append(diagnostics, argTypeDiags...)
+			// Check function call argument types (disabled: best-effort inference
+			// produces false positives on C/raylib types and case differences;
+			// the compiler does not enforce argument types, so these are noise)
+			_ = checkFunctionCallArgumentTypes(doc)
 
 			// Check for duplicate function definitions across package files
 			duplicateFuncDiags := checkDuplicateFunctionDefinitions(doc)
@@ -2443,14 +2447,27 @@ func checkFunctionCallArgumentTypes(doc *Document) []protocol.Diagnostic {
 						}
 					}
 
-					// Check for type mismatches
-					mismatch := false
+					// Check for type mismatches. Only report when every argument type
+					// is known: best-effort inference leaves gaps, and a mismatch on
+					// a guess is worse than no diagnostic at all.
+					allKnown := true
 					for i := 0; i < len(expectedTypes) && i < len(actualTypes); i++ {
+						a := actualTypes[i]
+						e := expectedTypes[i]
+						if e == "" || e == "unknown" || e == "generic" || e == "any" || e == "infer" ||
+							a == "" || a == "unknown" || a == "generic" || a == "any" || a == "infer" {
+							allKnown = false
+							break
+						}
+					}
+					mismatch := false
+					if allKnown {
+						for i := 0; i < len(expectedTypes) && i < len(actualTypes); i++ {
 						expected := expectedTypes[i]
 						actual := actualTypes[i]
 
 						// Skip if either type is unknown, generic, any, or infer
-						if expected == "" || expected == "unknown" || actual == "unknown" ||
+						if expected == "" || expected == "unknown" || actual == "unknown" || actual == "" ||
 							expected == "generic" || actual == "generic" ||
 							expected == "any" || actual == "any" ||
 							expected == "infer" || actual == "infer" {
@@ -2474,12 +2491,54 @@ func checkFunctionCallArgumentTypes(doc *Document) []protocol.Diagnostic {
 							continue
 						}
 
+						// Case-insensitive type match (handles Vector3 vs vector3 etc.)
+						if strings.EqualFold(expected, actual) {
+							continue
+						}
+
+						// C typedef aliases: `Camera` is `typedef Camera3D Camera`
+						// in raylib, so `camera` (from mapCTypeToAhoyType) must
+						// match `Camera3D` (from the declared variable type).
+						// Same for Texture2D vs Texture, Quaternion vs Vector4.
+						// NOTE: do NOT strip trailing digits here - that would
+						// conflate Vector2 with Vector3 / Camera2D with Camera3D.
+						if cTypedefCompatible(expected, actual, doc) {
+							continue
+						}
+
+						// Allow untyped containers to match typed ones:
+						// `array` matches `array[X]`, `dict` matches `dict[X,Y]`.
+						// The LSP's best-effort inference rarely recovers the
+						// element type, so a bare container type is not a real
+						// mismatch.
+						if (expected == "array" || strings.HasPrefix(expected, "array[")) &&
+							(actual == "array" || strings.HasPrefix(actual, "array[")) {
+							continue
+						}
+						if (expected == "dict" || strings.HasPrefix(expected, "dict[")) &&
+							(actual == "dict" || strings.HasPrefix(actual, "dict[")) {
+							continue
+						}
+						if actual == "object" || actual == "unknown" {
+							continue
+						}
+
 						// Check for mismatch using type compatibility (handles aliases and unions)
 						compatible := false
 						if symbolTable != nil && symbolTable.GlobalScope != nil {
 							compatible = symbolTable.GlobalScope.TypesCompatible(expected, actual)
 						} else {
-							compatible = (expected == actual)
+							// Case-insensitive fallback when no symbol table scope
+							compatible = strings.EqualFold(expected, actual)
+						}
+						// Always allow case-insensitive match (handles Vector3 vs vector3)
+						if !compatible {
+							compatible = strings.EqualFold(expected, actual)
+						}
+						// C typedef aliases from imported headers
+						// (handles Camera vs Camera3D, Texture vs Texture2D, etc.)
+						if !compatible {
+							compatible = cTypedefCompatible(expected, actual, doc)
 						}
 
 						if !compatible {
@@ -2487,7 +2546,7 @@ func checkFunctionCallArgumentTypes(doc *Document) []protocol.Diagnostic {
 							break
 						}
 					}
-
+					}
 					if mismatch {
 						// Build type list strings
 						expectedStr := "["
@@ -2869,11 +2928,18 @@ func inferExpressionType(node *ahoy.ASTNode, doc *Document) string {
 
 	case ahoy.NODE_IDENTIFIER:
 		// Look up the identifier in the symbol table
-		if doc != nil && doc.SymbolTable != nil && doc.SymbolTable.GlobalScope != nil {
+		if doc != nil && doc.SymbolTable != nil {
+		// Prefer position-aware lookup so local variables (e.g. `light: Node = nodes[i]`)
+		// resolve to their declared type instead of falling through to C defines.
+		if sym := doc.SymbolTable.LookupAtPosition(node.Value, node.Line, node.Column); sym != nil {
+			return sym.Type
+		}
+		if doc.SymbolTable.GlobalScope != nil {
 			if sym := doc.SymbolTable.GlobalScope.Lookup(node.Value); sym != nil {
 				return sym.Type
 			}
 		}
+	}
 
 		// Check if it's a C #define constant
 		if doc != nil && doc.CHeaderGlobal != nil {
@@ -3048,6 +3114,83 @@ func mapCTypeToAhoyType(cType string) string {
 		}
 		return cType
 	}
+}
+
+// resolveCTypeAlias resolves a type through C typedef aliases
+// (e.g. Camera -> Camera3D, Texture2D -> Texture, Quaternion -> Vector4)
+// case-insensitively, following chains. Returns the final base type,
+// or the original if it is not an alias.
+func resolveCTypeAlias(t string, doc *Document) string {
+	if doc == nil || t == "" {
+		return t
+	}
+	seen := map[string]bool{}
+	cur := t
+	for {
+		lower := strings.ToLower(cur)
+		if seen[lower] {
+			break
+		}
+		seen[lower] = true
+		var base string
+		found := false
+		if doc.CHeaderGlobal != nil && doc.CHeaderGlobal.Typedefs != nil {
+			for alias, td := range doc.CHeaderGlobal.Typedefs {
+				if strings.EqualFold(alias, cur) && td != nil {
+					base = td.BaseType
+					found = true
+					break
+				}
+			}
+		}
+		if !found && doc.CHeaders != nil {
+			for _, h := range doc.CHeaders {
+				if h == nil || h.Typedefs == nil {
+					continue
+				}
+				for alias, td := range h.Typedefs {
+					if strings.EqualFold(alias, cur) && td != nil {
+						base = td.BaseType
+						found = true
+						break
+					}
+				}
+				if found {
+					break
+				}
+			}
+		}
+		if !found || base == "" {
+			break
+		}
+		cur = base
+	}
+	return cur
+}
+
+// cTypedefCompatible reports whether two types match after resolving
+// C typedef aliases and ignoring case. This handles raylib aliases like
+// Camera (typedef Camera3D Camera) where the signature says "camera"
+// but the call site declares "Camera3D", and Texture2D vs Texture, etc.
+func cTypedefCompatible(expected, actual string, doc *Document) bool {
+	if expected == "" || actual == "" {
+		return false
+	}
+	if strings.EqualFold(expected, actual) {
+		return true
+	}
+	// Resolve typedef chains on both sides, then compare case-insensitively.
+	// Resolving both sides covers either direction (alias vs base).
+	re := resolveCTypeAlias(expected, doc)
+	ra := resolveCTypeAlias(actual, doc)
+	if strings.EqualFold(re, ra) {
+		return true
+	}
+	// Also compare lowercased resolved forms for robustness.
+	if strings.ToLower(re) == strings.ToLower(ra) {
+		return true
+	}
+	return false
 }
 
 // extractTypeFromDefine extracts type information from a C #define value

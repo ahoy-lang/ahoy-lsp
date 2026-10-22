@@ -139,9 +139,9 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 			return reply(ctx, hover, nil)
 		}
 
-		// Check C structs (case-insensitive match)
+		// Check C structs (exact case)
 		for structName, cStruct := range doc.CHeaderGlobal.Structs {
-			if ahoy.ToLowerFirst(structName) == word || structName == word {
+			if structName == word {
 				hoverText := fmt.Sprintf("```c\ntypedef struct %s {\n", structName)
 				for _, field := range cStruct.Fields {
 					hoverText += fmt.Sprintf("    %s %s;\n", field.Type, field.Name)
@@ -232,7 +232,7 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 
 		// Check structs
 		for structName, cStruct := range headerInfo.Structs {
-			if ahoy.ToLowerFirst(structName) == word || structName == word {
+			if structName == word {
 				hoverText := fmt.Sprintf("```c\ntypedef struct %s {\n", structName)
 				for _, field := range cStruct.Fields {
 					hoverText += fmt.Sprintf("    %s %s;\n", field.Type, field.Name)
@@ -349,7 +349,7 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 					// Check C header structs
 					if doc.CHeaderGlobal != nil {
 						for structName, cStruct := range doc.CHeaderGlobal.Structs {
-							if ahoy.ToLowerFirst(structName) == objectType || structName == objectType {
+							if structName == objectType {
 								for _, fieldInfo := range cStruct.Fields {
 									if fieldInfo.Name == word {
 										hoverText := fmt.Sprintf("```c\n%s %s;\n```\n\n", fieldInfo.Type, word)

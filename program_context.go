@@ -429,5 +429,20 @@ func mergePackageCHeaders(doc *Document) {
 				doc.CHeaderGlobal.Structs[name] = strct
 			}
 		}
+		for name, td := range global.Typedefs {
+			if _, exists := doc.CHeaderGlobal.Typedefs[name]; !exists {
+				doc.CHeaderGlobal.Typedefs[name] = td
+			}
+		}
+		if global.FuncPtrTypedefs != nil {
+			if doc.CHeaderGlobal.FuncPtrTypedefs == nil {
+				doc.CHeaderGlobal.FuncPtrTypedefs = make(map[string]*ahoy.CFuncPtrTypedef)
+			}
+			for name, td := range global.FuncPtrTypedefs {
+				if _, exists := doc.CHeaderGlobal.FuncPtrTypedefs[name]; !exists {
+					doc.CHeaderGlobal.FuncPtrTypedefs[name] = td
+				}
+			}
+		}
 	}
 }

@@ -302,6 +302,7 @@ func (s *Server) handleDidOpen(ctx context.Context, reply jsonrpc2.Replier, req 
 			Functions: make(map[string]*ahoy.CFunction),
 			Enums:     make(map[string]*ahoy.CEnum),
 			Defines:   make(map[string]*ahoy.CDefine),
+			Structs:   make(map[string]*ahoy.CStruct),
 			Typedefs:  make(map[string]*ahoy.CTypedef),
 		}
 	}
@@ -460,6 +461,7 @@ func (s *Server) handleDidChange(ctx context.Context, reply jsonrpc2.Replier, re
 				Functions: make(map[string]*ahoy.CFunction),
 				Enums:     make(map[string]*ahoy.CEnum),
 				Defines:   make(map[string]*ahoy.CDefine),
+				Structs:   make(map[string]*ahoy.CStruct),
 				Typedefs:  make(map[string]*ahoy.CTypedef),
 			}
 		}
@@ -591,6 +593,17 @@ func extractCHeaderInfoWithURI(ast *ahoy.ASTNode, docURI uri.URI) (map[string]*a
 				}
 				for name, str := range headerInfo.Structs {
 					cHeaderGlobal.Structs[name] = str
+				}
+				for name, td := range headerInfo.Typedefs {
+					cHeaderGlobal.Typedefs[name] = td
+				}
+				if headerInfo.FuncPtrTypedefs != nil {
+					if cHeaderGlobal.FuncPtrTypedefs == nil {
+						cHeaderGlobal.FuncPtrTypedefs = make(map[string]*ahoy.CFuncPtrTypedef)
+					}
+					for name, td := range headerInfo.FuncPtrTypedefs {
+						cHeaderGlobal.FuncPtrTypedefs[name] = td
+					}
 				}
 				debugLog.Printf("Loaded C header %s globally: %d functions, %d enums, %d structs",
 					resolvedPath, len(headerInfo.Functions), len(headerInfo.Enums), len(headerInfo.Structs))

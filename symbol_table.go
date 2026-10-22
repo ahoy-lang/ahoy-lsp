@@ -1085,6 +1085,18 @@ func (st *SymbolTable) inferType(node *ahoy.ASTNode) string {
 		return "bool"
 	case ahoy.NODE_ARRAY_LITERAL:
 		return "array"
+
+	case ahoy.NODE_ARRAY_ACCESS:
+		// Infer element type from the array variable's type (e.g.
+		// array[Node] -> Node). Falls back to "unknown" when the
+		// array type is untyped.
+		if len(node.Children) > 0 {
+			arrType := st.inferType(node.Children[0])
+			if strings.HasPrefix(arrType, "array[") && strings.HasSuffix(arrType, "]") {
+				return arrType[len("array[") : len(arrType)-1]
+			}
+		}
+		return "unknown"
 	case ahoy.NODE_DICT_LITERAL:
 		// Check if this is a struct initialization by looking for type annotation
 		if node.DataType != "" {

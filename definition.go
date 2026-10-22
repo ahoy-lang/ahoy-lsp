@@ -356,9 +356,9 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 			}
 		}
 
-		// Check C structs (case-insensitive)
+		// Check C structs (exact case — `Vector3` is a type, `vector3` is not)
 		for structName, cStruct := range doc.CHeaderGlobal.Structs {
-			if ahoy.ToLowerFirst(structName) == word || structName == word {
+			if structName == word {
 				// Use the File field directly from the struct
 				if cStruct.File != "" {
 					location := protocol.Location{
@@ -460,7 +460,7 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 
 		// Check structs
 		for structName, cStruct := range headerInfo.Structs {
-			if ahoy.ToLowerFirst(structName) == word || structName == word {
+			if structName == word {
 				for _, child := range doc.AST.Children {
 					if child.Type == ahoy.NODE_IMPORT_STATEMENT && child.DataType == namespace {
 						resolvedPath := resolveImportPath(child.Value, params.TextDocument.URI)
@@ -578,7 +578,7 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 				// Check C header structs
 				if doc.CHeaderGlobal != nil {
 					for structName, cStruct := range doc.CHeaderGlobal.Structs {
-						if ahoy.ToLowerFirst(structName) == objectType || structName == objectType {
+						if structName == objectType {
 							for _, fieldInfo := range cStruct.Fields {
 								if fieldInfo.Name == word {
 									if cStruct.File != "" {

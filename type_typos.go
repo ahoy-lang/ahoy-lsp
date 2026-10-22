@@ -91,15 +91,21 @@ func checkTypeTypos(doc *Document) []protocol.Diagnostic {
 		}
 	}
 
-	// Collect C types from imports
+	// Collect C types from imports (exact case only — the compiler is
+	// case-sensitive: `Vector3` is valid but `vector3` is `'vector3' undeclared`.
+	// Functions are snake_case, types preserve C casing.)
 	if doc.CHeaderGlobal != nil {
 		for typeName := range doc.CHeaderGlobal.Structs {
 			validTypes[typeName] = true
-			validTypes[strings.ToLower(typeName)] = true // Also add lowercase version
 		}
 		for typeName := range doc.CHeaderGlobal.Enums {
 			validTypes[typeName] = true
-			validTypes[strings.ToLower(typeName)] = true
+		}
+		// C typedef aliases (Camera, Texture2D, Quaternion, etc.) are valid types too.
+		if doc.CHeaderGlobal.Typedefs != nil {
+			for typeName := range doc.CHeaderGlobal.Typedefs {
+				validTypes[typeName] = true
+			}
 		}
 	}
 	
@@ -108,11 +114,14 @@ func checkTypeTypos(doc *Document) []protocol.Diagnostic {
 		for _, cHeader := range doc.CHeaders {
 			for typeName := range cHeader.Structs {
 				validTypes[typeName] = true
-				validTypes[strings.ToLower(typeName)] = true
 			}
 			for typeName := range cHeader.Enums {
 				validTypes[typeName] = true
-				validTypes[strings.ToLower(typeName)] = true
+			}
+			if cHeader.Typedefs != nil {
+				for typeName := range cHeader.Typedefs {
+					validTypes[typeName] = true
+				}
 			}
 		}
 	}
@@ -130,21 +139,27 @@ func checkTypeTypos(doc *Document) []protocol.Diagnostic {
 			if sibGlobal != nil {
 				for typeName := range sibGlobal.Structs {
 					validTypes[typeName] = true
-					validTypes[strings.ToLower(typeName)] = true
 				}
 				for typeName := range sibGlobal.Enums {
 					validTypes[typeName] = true
-					validTypes[strings.ToLower(typeName)] = true
+				}
+				if sibGlobal.Typedefs != nil {
+					for typeName := range sibGlobal.Typedefs {
+						validTypes[typeName] = true
+					}
 				}
 			}
 			for _, cHeader := range sibHeaders {
 				for typeName := range cHeader.Structs {
 					validTypes[typeName] = true
-					validTypes[strings.ToLower(typeName)] = true
 				}
 				for typeName := range cHeader.Enums {
 					validTypes[typeName] = true
-					validTypes[strings.ToLower(typeName)] = true
+				}
+				if cHeader.Typedefs != nil {
+					for typeName := range cHeader.Typedefs {
+						validTypes[typeName] = true
+					}
 				}
 			}
 		}
