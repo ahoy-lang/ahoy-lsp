@@ -46,7 +46,7 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 			if startLine >= 0 && startLine < len(doc.Lines) {
 				lineContent := strings.TrimSpace(doc.Lines[startLine])
 				hoverText := fmt.Sprintf("**Block End**\n\nCloses block starting at line %d:\n```ahoy\n%s\n```", startLine+1, lineContent)
-				
+
 				hover := protocol.Hover{
 					Contents: protocol.MarkupContent{
 						Kind:  protocol.Markdown,
@@ -278,18 +278,18 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 	if int(params.Position.Line) < len(doc.Lines) {
 		line := doc.Lines[int(params.Position.Line)]
 		charPos := int(params.Position.Character)
-		
+
 		if charPos > 0 && charPos <= len(line) {
 			beforeCursor := line[:charPos]
 			if dotIdx := strings.LastIndex(beforeCursor, "."); dotIdx >= 0 {
 				exprPart := strings.TrimSpace(beforeCursor[:dotIdx])
-				
+
 				// Infer the type of the expression before the dot
 				var objectType string
 				if doc.AST != nil {
 					objectType = inferTypeFromExpression(doc, exprPart, int(params.Position.Line))
 				}
-				
+
 				// Fallback to simple variable lookup
 				if objectType == "" {
 					objectName := ""
@@ -304,14 +304,14 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 					if objectName == "" && len(exprPart) > 0 {
 						objectName = exprPart
 					}
-					
+
 					if doc.SymbolTable != nil {
 						if sym := doc.SymbolTable.Lookup(objectName); sym != nil {
 							objectType = sym.Type
 						}
 					}
 				}
-				
+
 				// If we found the type, show struct field info
 				if objectType != "" {
 					// Check user-defined structs
@@ -327,11 +327,11 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 											if typeNode.DataType != "" {
 												fieldType = typeNode.DataType
 											}
-											
+
 											hoverText := fmt.Sprintf("```ahoy\n%s: %s\n```\n\n", word, fieldType)
 											hoverText += fmt.Sprintf("**Struct Field** of `%s`\n\n", objectType)
 											hoverText += fmt.Sprintf("Defined at line %d", fieldNode.Line)
-											
+
 											hover := protocol.Hover{
 												Contents: protocol.MarkupContent{
 													Kind:  protocol.Markdown,
@@ -345,7 +345,7 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 							}
 						}
 					}
-					
+
 					// Check C header structs
 					if doc.CHeaderGlobal != nil {
 						for structName, cStruct := range doc.CHeaderGlobal.Structs {
@@ -354,7 +354,7 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 									if fieldInfo.Name == word {
 										hoverText := fmt.Sprintf("```c\n%s %s;\n```\n\n", fieldInfo.Type, word)
 										hoverText += fmt.Sprintf("**C Struct Field** of `%s`", structName)
-										
+
 										hover := protocol.Hover{
 											Contents: protocol.MarkupContent{
 												Kind:  protocol.Markdown,
@@ -596,75 +596,68 @@ func buildHoverText(symbol *Symbol) string {
 
 func getKeywordHover(keyword string) string {
 	keywordDocs := map[string]string{
-		"if":      "**if** - Conditional statement\n\nSyntax: `if condition then ... end`",
-		"else":    "**else** - Alternative branch in conditional\n\nSyntax: `if condition then ... else ... end`",
-		"elseif":  "**elseif** - Additional condition in if statement\n\nSyntax: `if cond1 then ... elseif cond2 then ... end`",
-		"anif":    "**anif** - Alternative to elseif\n\nSyntax: `if cond1 then ... anif cond2 then ... end`",
-		"then":    "**then** - Begins the body of a conditional or loop",
-		"do":      "**do** - Begins the body of a loop",
-		"end":     "**end** - Closes a block (if, loop, func, etc.)",
-		"loop":    "**loop** - Loop statement\n\nSyntax:\n- `loop condition do ... end`\n- `loop i:start to end do ... end`\n- `loop element in array do ... end`",
-		"in":      "**in** - Used in for-in loops\n\nSyntax: `loop element in array do ... end`",
-		"to":      "**to** - Range operator in loops\n\nSyntax: `loop i:1 to 10 do ... end`",
-		"func":    "**func** - Function definition\n\nSyntax: `func name param1 type1 param2 type2 do ... end`",
-		"return":  "**return** - Return from function\n\nSyntax: `return value`",
-		"break":   "**break** - Exit from loop",
-		"skip":    "**skip** - Continue to next loop iteration (like continue)",
-		"switch":  "**switch** - Switch statement\n\nSyntax: `switch value on case1 do ... case2 do ... end`",
-		"on":      "**on** - Used in switch statements",
-		"when":    "**when** - Compile-time conditional\n\nSyntax: `when CONDITION do ... end`",
-		"import":  "**import** - Import external library\n\nSyntax: `import \"library.h\"`",
-		"ahoy":    "**ahoy** - Print statement (shorthand for print)\n\nSyntax: `ahoy \"Hello!\"`",
-		"log":     "**log** - Log message to file with timestamp\n\nSyntax: `log|\"message\", \"file.log\"|`",
-		"panic":   "**panic** - Print error and exit program\n\nSyntax: `panic|\"error message\"|`",
-		"is":      "**is** - Equality operator (==)\n\nSyntax: `if x is 5 then ... end`",
-		"not":     "**not** - Logical NOT operator (!)\n\nSyntax: `if not condition then ... end`",
-		"and":     "**and** - Logical AND operator (&&)\n\nSyntax: `if cond1 and cond2 then ... end`",
-		"or":      "**or** - Logical OR operator (||)\n\nSyntax: `if cond1 or cond2 then ... end`",
-		"true":    "**true** - Boolean true value",
-		"false":   "**false** - Boolean false value",
-		"enum":    "**enum** - Enumeration definition\n\nSyntax: `name enum: VALUE1 VALUE2 VALUE3 end`",
-		"struct":  "**struct** - Structure definition\n\nSyntax: `name struct: field1 type1 field2 type2 end`",
-		"type":    "**type** - Type alias",
-		"int":     "**int** - Integer type (32-bit signed)",
-		"float":   "**float** - Floating-point number type (64-bit)",
-		"f32":     "**f32** - 4-byte float type (C `float`)\n\nAlso a cast: `f32(1.5)`",
-		"i8":      "**i8** - Signed 8-bit integer type\n\nAlso a cast: `i8(-120)`",
-		"u8":      "**u8** - Unsigned 8-bit integer type\n\nAlso a cast: `u8(250)`",
-		"i16":     "**i16** - Signed 16-bit integer type\n\nAlso a cast: `i16(-30000)`",
-		"u16":     "**u16** - Unsigned 16-bit integer type\n\nAlso a cast: `u16(65535)`",
-		"i32":     "**i32** - Signed 32-bit integer type\n\nAlso a cast: `i32(-5)`",
-		"u32":     "**u32** - Unsigned 32-bit integer type\n\nAlso a cast: `u32(4000000000)`",
-		"i64":     "**i64** - Signed 64-bit integer type\n\nAlso a cast: `i64(3000000000)`",
-		"u64":     "**u64** - Unsigned 64-bit integer type\n\nAlso a cast: `u64(18446744073709551615)`",
-		"buffer":  "**buffer** - Flat POD buffer type (`buffer[f32]`)\n\n`buffer|n|` allocates a zeroed buffer of length n",
-		"buffer_int": "**buffer_int** - Int-lane buffer (`buffer[int]`, int32 storage)\n\n`buffer_int|n|` allocates a zeroed buffer of length n",
-		"grow":    "**grow** - Grow a buffer: `grow|buf, n|` returns a new buffer of length n with the contents copied over",
-	"sin":     "**sin** - Sine: `sin|x|` gives sin(x) in radians",
-	"cos":     "**cos** - Cosine: `cos|x|` gives cos(x) in radians",
-	"tan":     "**tan** - Tangent: `tan|x|` gives tan(x) in radians",
-	"asin":    "**asin** - Arcsine: `asin|x|` gives asin(x), x clamped to [-1, 1]",
-	"acos":    "**acos** - Arccosine: `acos|x|` gives acos(x), x clamped to [-1, 1]",
-	"atan":    "**atan** - Arctangent: `atan|x|` gives atan(x)",
-	"atan2":   "**atan2** - Two-argument arctangent: `atan2|y, x|` gives the angle of (x, y)",
-	"fmod":    "**fmod** - Float remainder: `fmod|x, y|` gives x mod y",
-	"ln":      "**ln** - Natural log: `ln|x|` gives ln(x), 0 when x is not positive",
-	"exp":     "**exp** - Exponential: `exp|x|` gives e^x",
-	"time_now": "**time_now** - Monotonic clock: `time_now||` gives seconds since program start",
-		"to_bytes": "**to_bytes** - Serialize a buffer: `to_bytes|buf|` gives an array[int] image (LE u32 count, then LE float32 bytes)",
-		"from_bytes": "**from_bytes** - Verified rebuild: `from_bytes|bytes|` gives the buffer[f32], or an empty buffer when framing fails",
+		"if":             "**if** - Conditional statement\n\nSyntax: `if condition then ... end`",
+		"guard":          "**guard** - Guard clause: the condition must hold, or the else arm diverges\n\nSyntax: `guard condition else return $`\n\nA guard `else` must end in `return`, `halt` or `next`.",
+		"else":           "**else** - Alternative branch in conditional\n\nSyntax: `if condition then ... else ... end`",
+		"elif":           "**elif** - Additional condition in an if statement\n\nSyntax: `if cond1 then ... elif cond2 then ... end`",
+		"then":           "**then** - Begins the body of a conditional or loop",
+		"do":             "**do** - Begins the body of a loop",
+		"end":            "**end** - Closes a block (if, loop, func, etc.)",
+		"loop":           "**loop** - Loop statement\n\nSyntax:\n- `loop condition do ... end`\n- `loop i:start to end do ... end`\n- `loop element in array do ... end`",
+		"in":             "**in** - Used in for-in loops\n\nSyntax: `loop element in array do ... end`",
+		"to":             "**to** - Range operator in loops\n\nSyntax: `loop i:1 to 10 do ... end`",
+		"func":           "**func** - Function definition\n\nSyntax: `func name param1 type1 param2 type2 do ... end`",
+		"return":         "**return** - Return from function\n\nSyntax: `return value`",
+		"break":          "**break** - Exit from loop",
+		"skip":           "**skip** - Continue to next loop iteration (like continue)",
+		"switch":         "**switch** - Switch statement\n\nSyntax: `switch value on case1 do ... case2 do ... end`",
+		"on":             "**on** - Used in switch statements",
+		"when":           "**when** - Compile-time conditional\n\nSyntax: `when CONDITION do ... end`",
+		"import":         "**import** - Import external library\n\nSyntax: `import \"library.h\"`",
+		"ahoy":           "**ahoy** - Print statement (shorthand for print)\n\nSyntax: `ahoy \"Hello!\"`",
+		"log":            "**log** - Log message to file with timestamp\n\nSyntax: `log|\"message\", \"file.log\"|`",
+		"panic":          "**panic** - Print error and exit program\n\nSyntax: `panic|\"error message\"|`",
+		"is":             "**is** - Equality operator (==)\n\nSyntax: `if x is 5 then ... end`",
+		"not":            "**not** - Logical NOT operator (!)\n\nSyntax: `if not condition then ... end`",
+		"and":            "**and** - Logical AND operator (&&)\n\nSyntax: `if cond1 and cond2 then ... end`",
+		"or":             "**or** - Logical OR operator (||)\n\nSyntax: `if cond1 or cond2 then ... end`",
+		"true":           "**true** - Boolean true value",
+		"false":          "**false** - Boolean false value",
+		"enum":           "**enum** - Enumeration definition\n\nSyntax: `name enum: VALUE1 VALUE2 VALUE3 end`",
+		"struct":         "**struct** - Structure definition\n\nSyntax: `name struct: field1 type1 field2 type2 end`",
+		"type":           "**type** - Type alias",
+		"int":            "**int** - Integer type (32-bit signed)",
+		"float":          "**float** - Floating-point number type (64-bit)",
+		"f32":            "**f32** - 4-byte float type (C `float`)\n\nAlso a cast: `f32(1.5)`",
+		"i8":             "**i8** - Signed 8-bit integer type\n\nAlso a cast: `i8(-120)`",
+		"u8":             "**u8** - Unsigned 8-bit integer type\n\nAlso a cast: `u8(250)`",
+		"i16":            "**i16** - Signed 16-bit integer type\n\nAlso a cast: `i16(-30000)`",
+		"u16":            "**u16** - Unsigned 16-bit integer type\n\nAlso a cast: `u16(65535)`",
+		"i32":            "**i32** - Signed 32-bit integer type\n\nAlso a cast: `i32(-5)`",
+		"u32":            "**u32** - Unsigned 32-bit integer type\n\nAlso a cast: `u32(4000000000)`",
+		"i64":            "**i64** - Signed 64-bit integer type\n\nAlso a cast: `i64(3000000000)`",
+		"u64":            "**u64** - Unsigned 64-bit integer type\n\nAlso a cast: `u64(18446744073709551615)`",
+		"buffer":         "**buffer** - Flat POD buffer type (`buffer[f32]`)\n\n`buffer|n|` allocates a zeroed buffer of length n",
+		"buffer_int":     "**buffer_int** - Int-lane buffer (`buffer[int]`, int32 storage)\n\n`buffer_int|n|` allocates a zeroed buffer of length n",
+		"grow":           "**grow** - Grow a buffer: `grow|buf, n|` returns a new buffer of length n with the contents copied over",
+		"sin":            "**sin** - Sine: `sin|x|` gives sin(x) in radians",
+		"cos":            "**cos** - Cosine: `cos|x|` gives cos(x) in radians",
+		"tan":            "**tan** - Tangent: `tan|x|` gives tan(x) in radians",
+		"asin":           "**asin** - Arcsine: `asin|x|` gives asin(x), x clamped to [-1, 1]",
+		"acos":           "**acos** - Arccosine: `acos|x|` gives acos(x), x clamped to [-1, 1]",
+		"atan":           "**atan** - Arctangent: `atan|x|` gives atan(x)",
+		"atan2":          "**atan2** - Two-argument arctangent: `atan2|y, x|` gives the angle of (x, y)",
+		"fmod":           "**fmod** - Float remainder: `fmod|x, y|` gives x mod y",
+		"ln":             "**ln** - Natural log: `ln|x|` gives ln(x), 0 when x is not positive",
+		"exp":            "**exp** - Exponential: `exp|x|` gives e^x",
+		"time_now":       "**time_now** - Monotonic clock: `time_now||` gives seconds since program start",
+		"to_bytes":       "**to_bytes** - Serialize a buffer: `to_bytes|buf|` gives an array[int] image (LE u32 count, then LE float32 bytes)",
+		"from_bytes":     "**from_bytes** - Verified rebuild: `from_bytes|bytes|` gives the buffer[f32], or an empty buffer when framing fails",
 		"from_bytes_int": "**from_bytes_int** - Verified int rebuild: `from_bytes_int|bytes|` gives the buffer[int], or an empty buffer when framing or lane fails",
-		"from_bytes_ok": "**from_bytes_ok** - Verify an image: `from_bytes_ok|bytes|` is true only when length, count, tags and ranges all check out",
-		"string":  "**string** - String type",
-		"bool":    "**bool** - Boolean type",
-		"dict":    "**dict** - Dictionary/map type",
-		"plus":    "**plus** - Addition operator (+)\n\nSyntax: `result: a plus b`",
-		"minus":   "**minus** - Subtraction operator (-)\n\nSyntax: `result: a minus b`",
-		"times":   "**times** - Multiplication operator (*)\n\nSyntax: `result: a times b`",
-		"div":     "**div** - Division operator (/)\n\nSyntax: `result: a div b`",
-		"mod":     "**mod** - Modulo operator (%)\n\nSyntax: `result: a mod b`",
-		"lesser":  "**lesser** - Less than operator (<)\n\nSyntax: `if a lesser b then ... end`",
-		"greater": "**greater** - Greater than operator (>)\n\nSyntax: `if a greater b then ... end`",
+		"from_bytes_ok":  "**from_bytes_ok** - Verify an image: `from_bytes_ok|bytes|` is true only when length, count, tags and ranges all check out",
+		"string":         "**string** - String type",
+		"bool":           "**bool** - Boolean type",
+		"dict":           "**dict** - Dictionary/map type",
 	}
 
 	if doc, ok := keywordDocs[keyword]; ok {

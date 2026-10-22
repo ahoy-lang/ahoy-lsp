@@ -29,7 +29,7 @@ func checkDuplicateFunctionDefinitions(doc *Document) []protocol.Diagnostic {
 	}
 
 	thisFuncs := make(map[string]funcDef)
-	
+
 	var collectFuncs func(node *ahoy.ASTNode)
 	collectFuncs = func(node *ahoy.ASTNode) {
 		if node == nil {
@@ -57,13 +57,15 @@ func checkDuplicateFunctionDefinitions(doc *Document) []protocol.Diagnostic {
 	// Check against all functions in ALL package files
 	for funcName, thisDef := range thisFuncs {
 		debugLog.Printf("[DupFunc] Checking function %s at line %d in %s", funcName, thisDef.line, thisDef.file)
-		
-		// Check each package file for this function
+
+		// Check each package file for this function. Imported packages are a
+		// separate namespace at build time; only same-program sibling files
+		// can collide with this package's definitions.
 		for pkgURI, pkgFile := range doc.PackageFiles {
-			if pkgFile.AST == nil {
+			if pkgFile.IsImport || pkgFile.AST == nil {
 				continue
 			}
-			
+
 			// Collect functions from this package file
 			var findFunc func(node *ahoy.ASTNode) *ahoy.ASTNode
 			findFunc = func(node *ahoy.ASTNode) *ahoy.ASTNode {
@@ -80,11 +82,11 @@ func checkDuplicateFunctionDefinitions(doc *Document) []protocol.Diagnostic {
 				}
 				return nil
 			}
-			
+
 			if foundFunc := findFunc(pkgFile.AST); foundFunc != nil {
 				// Found the same function name in another file
 				debugLog.Printf("[DupFunc]   Found duplicate in %s at line %d", pkgURI, foundFunc.Line)
-				
+
 				// Get the other file name (just filename, not full path)
 				otherFile := string(pkgURI)
 				if idx := strings.LastIndex(otherFile, "/"); idx != -1 {
@@ -100,7 +102,7 @@ func checkDuplicateFunctionDefinitions(doc *Document) []protocol.Diagnostic {
 					endChar = uint32(len(funcName) + 20)
 				}
 
-				message := fmt.Sprintf("function '%s' already defined in %s line %d; function overloading not supported in ahoy", 
+				message := fmt.Sprintf("function '%s' already defined in %s line %d; function overloading not supported in ahoy",
 					funcName, otherFile, foundFunc.Line)
 
 				diagnostic := protocol.Diagnostic{

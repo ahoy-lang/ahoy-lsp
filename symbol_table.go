@@ -10,17 +10,17 @@ import (
 
 // Symbol represents a symbol in the code (variable, function, type, etc.)
 type Symbol struct {
-	Name        string
-	Kind        SymbolKind
-	Type        string
-	Line        int
-	Column      int
-	EndLine     int
-	EndColumn   int
-	File        string                  // Source file path for cross-file tracking
-	Fields      map[string]*StructField // For struct types, stores fields and nested types
-	FieldOrder  []string                // Ordered list of field names for consistent display
-	Parameters  []ParameterInfo         // For functions, stores parameter information
+	Name       string
+	Kind       SymbolKind
+	Type       string
+	Line       int
+	Column     int
+	EndLine    int
+	EndColumn  int
+	File       string                  // Source file path for cross-file tracking
+	Fields     map[string]*StructField // For struct types, stores fields and nested types
+	FieldOrder []string                // Ordered list of field names for consistent display
+	Parameters []ParameterInfo         // For functions, stores parameter information
 	// Don't store Definition node or Scope to prevent memory leaks - AST can't be GC'd
 }
 
@@ -46,12 +46,12 @@ const (
 	SymbolKindStruct
 	SymbolKindStructField
 	SymbolKindConstant
-	SymbolKindAlias      // Type alias
-	SymbolKindUnion      // Union type
-	SymbolKindCFunction  // C function from imported header
-	SymbolKindCEnum      // C enum from imported header
-	SymbolKindCDefine    // C #define from imported header
-	SymbolKindDistinct   // Distinct newtype (same layout as base, checked strictly)
+	SymbolKindAlias     // Type alias
+	SymbolKindUnion     // Union type
+	SymbolKindCFunction // C function from imported header
+	SymbolKindCEnum     // C enum from imported header
+	SymbolKindCDefine   // C #define from imported header
+	SymbolKindDistinct  // Distinct newtype (same layout as base, checked strictly)
 )
 
 // Scope represents a lexical scope
@@ -98,17 +98,17 @@ func (s *Scope) ResolveType(typeName string) (string, bool) {
 	if sym == nil {
 		return typeName, false
 	}
-	
+
 	if sym.Kind == SymbolKindAlias {
 		// Recursively resolve in case of nested aliases
 		return s.ResolveType(sym.Type)
 	}
-	
+
 	if sym.Kind == SymbolKindUnion {
 		// For unions, return the type as-is but mark it as a union
 		return sym.Type, true
 	}
-	
+
 	return typeName, false
 }
 
@@ -117,7 +117,7 @@ func (s *Scope) TypesCompatible(expected, actual string) bool {
 	// Resolve both types
 	expectedResolved, expectedIsUnion := s.ResolveType(expected)
 	actualResolved, actualIsUnion := s.ResolveType(actual)
-	
+
 	// If expected is a union, check if actual matches any of the union types
 	if expectedIsUnion {
 		// Union types are stored with | separator (e.g., "int|float")
@@ -131,7 +131,7 @@ func (s *Scope) TypesCompatible(expected, actual string) bool {
 		}
 		return false
 	}
-	
+
 	// If actual is a union, check if expected matches any of the union types
 	if actualIsUnion {
 		// Union types are stored with | separator (e.g., "int|float")
@@ -145,20 +145,20 @@ func (s *Scope) TypesCompatible(expected, actual string) bool {
 		}
 		return false
 	}
-	
+
 	// Direct comparison of resolved types
 	if expectedResolved == actualResolved || expected == actual || expectedResolved == actual {
 		return true
 	}
-	
+
 	// Case-insensitive comparison for C types (e.g., Vector2 vs vector2)
 	// This allows flexibility in type naming while still catching real mismatches
-	if strings.EqualFold(expectedResolved, actualResolved) || 
-	   strings.EqualFold(expected, actual) || 
-	   strings.EqualFold(expectedResolved, actual) {
+	if strings.EqualFold(expectedResolved, actualResolved) ||
+		strings.EqualFold(expected, actual) ||
+		strings.EqualFold(expectedResolved, actual) {
 		return true
 	}
-	
+
 	return false
 }
 
@@ -171,6 +171,11 @@ type SymbolTable struct {
 	InferredParams  map[string][]string // function name -> inferred parameter types
 	InferredReturns map[string][]string // function name -> inferred return types
 	FilePath        string              // File path this symbol table was built from
+
+	// functionNodes indexes the AST's function declarations once. Type
+	// inference used to rescan the whole tree for every call to a function
+	// that had not been visited yet, which made building the table quadratic.
+	functionNodes map[string]*ahoy.ASTNode
 
 	// currentFunction is the function whose body is being walked. The code
 	// generator emits constants declared in main at global scope, so their
@@ -293,13 +298,13 @@ func (st *SymbolTable) findScopeAtPosition(scope *Scope, line int) *Scope {
 // GetVisibleSymbols returns all symbols visible at the given position
 func (st *SymbolTable) GetVisibleSymbols(line int) map[string]*Symbol {
 	result := make(map[string]*Symbol)
-	
+
 	// Find the scope at this position
 	scope := st.findScopeAtPosition(st.GlobalScope, line)
 	if scope == nil {
 		scope = st.GlobalScope
 	}
-	
+
 	// Collect symbols from current scope and all parent scopes
 	for scope != nil {
 		for name, sym := range scope.Symbols {
@@ -310,7 +315,7 @@ func (st *SymbolTable) GetVisibleSymbols(line int) map[string]*Symbol {
 		}
 		scope = scope.Parent
 	}
-	
+
 	return result
 }
 
@@ -354,16 +359,48 @@ func BuildSymbolTableWithFile(ast *ahoy.ASTNode, filePath string, inferredParams
 	}
 
 	st := NewSymbolTable()
-	st.AST = ast // Store AST for lookups
+	st.AST = ast           // Store AST for lookups
 	st.FilePath = filePath // Store file path for symbols
-	
+	st.indexFunctionNodes(ast)
+
 	// Store inferred parameter types if provided
 	if len(inferredParams) > 0 {
 		st.InferredParams = inferredParams[0]
 	}
-	
+
 	st.walkNode(ast, 0)
 	return st
+}
+
+// indexFunctionNodes records every function declaration in the AST so type
+// inference can find a function that has not been walked yet without rescanning
+// the tree for each call expression.
+func (st *SymbolTable) indexFunctionNodes(root *ahoy.ASTNode) {
+	st.functionNodes = make(map[string]*ahoy.ASTNode)
+	var walk func(*ahoy.ASTNode)
+	walk = func(node *ahoy.ASTNode) {
+		if node == nil {
+			return
+		}
+		if node.Type == ahoy.NODE_FUNCTION && node.Value != "" {
+			if _, exists := st.functionNodes[node.Value]; !exists {
+				st.functionNodes[node.Value] = node
+			}
+		}
+		for _, child := range node.Children {
+			walk(child)
+		}
+	}
+	walk(root)
+}
+
+// functionDeclaration returns the indexed declaration for name, falling back
+// to a tree walk only if the table was constructed without an index.
+func (st *SymbolTable) functionDeclaration(name string) *ahoy.ASTNode {
+	if st.functionNodes != nil {
+		return st.functionNodes[name]
+	}
+	return findFunctionDeclaration(st.AST, name)
 }
 
 func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
@@ -394,7 +431,7 @@ func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
 		funcName := node.Value
 		savedFunction := st.currentFunction
 		st.currentFunction = funcName
-		
+
 		// Get return type - use InferredReturns if available, otherwise use node.DataType
 		returnType := node.DataType
 		if st.InferredReturns != nil {
@@ -402,7 +439,7 @@ func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
 				returnType = strings.Join(inferredTypes, ",")
 			}
 		}
-		
+
 		symbol := &Symbol{
 			Name:       funcName,
 			Kind:       SymbolKindFunction,
@@ -412,7 +449,7 @@ func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
 			File:       st.FilePath, // Track which file this function is defined in
 			Parameters: []ParameterInfo{},
 		}
-		
+
 		// Collect parameters
 		if len(node.Children) > 0 {
 			params := node.Children[0]
@@ -428,7 +465,7 @@ func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
 				}
 			}
 		}
-		
+
 		st.AddSymbol(symbol)
 
 		// Enter function scope
@@ -448,7 +485,7 @@ func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
 						if paramNode.Line > 0 {
 							paramLine = paramNode.Line
 						}
-						
+
 						// Get parameter type - use explicit type if provided, otherwise inferred
 						paramType := paramNode.DataType
 						if (paramType == "" || paramType == "generic" || paramType == "any") && st.InferredParams != nil {
@@ -460,7 +497,7 @@ func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
 								}
 							}
 						}
-						
+
 						paramSymbol := &Symbol{
 							Name:   paramNode.Value,
 							Kind:   SymbolKindParameter,
@@ -479,7 +516,7 @@ func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
 		if len(node.Children) > 1 {
 			bodyNode := node.Children[1]
 			st.walkNode(bodyNode, depth+1)
-			
+
 			// Set end line from body - don't rely on body node's line, use children
 			if bodyNode != nil {
 				endLine := findLastLine(bodyNode)
@@ -512,13 +549,13 @@ func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
 			Line:   node.Line,
 			Column: 0,
 		}
-		
+
 		// Extract object literal properties if the value is an object literal
 		if len(node.Children) > 0 && node.Children[0].Type == ahoy.NODE_OBJECT_LITERAL {
 			symbol.Fields = st.extractObjectLiteralFields(node.Children[0])
 		}
-		
-		debugLog.Printf("Adding variable '%s' (type: %s) to scope at line %d (scope lines: %d-%d)", 
+
+		debugLog.Printf("Adding variable '%s' (type: %s) to scope at line %d (scope lines: %d-%d)",
 			varName, varType, node.Line, st.CurrentScope.StartLine, st.CurrentScope.EndLine)
 		st.AddSymbol(symbol)
 
@@ -534,19 +571,19 @@ func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
 		if len(node.Children) >= 2 {
 			leftSide := node.Children[0]
 			rightSide := node.Children[1]
-			
+
 			// Always register the variables on the left side
 			// The parser will handle validation, so we just need to track them
 			for _, leftChild := range leftSide.Children {
 				if leftChild.Type == ahoy.NODE_IDENTIFIER {
 					varName := leftChild.Value
 					varType := "any" // Default type
-					
+
 					// Try to infer type from right side if it's a function call
 					if len(rightSide.Children) == 1 && rightSide.Children[0].Type == ahoy.NODE_CALL {
 						callNode := rightSide.Children[0]
 						funcName := callNode.Value
-						
+
 						// First, check if we have pre-resolved return types
 						var returnTypeStr string
 						if st.InferredReturns != nil {
@@ -554,13 +591,13 @@ func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
 								returnTypeStr = strings.Join(inferredTypes, ",")
 							}
 						}
-						
+
 						// If not found in InferredReturns, look up function symbol
 						if returnTypeStr == "" {
 							funcSymbol := st.Lookup(funcName)
 							if funcSymbol != nil {
 								returnTypeStr = funcSymbol.Type
-								
+
 								// If function has infer/generic/any return type, try to infer it on the fly
 								if returnTypeStr == "infer" || returnTypeStr == "" || returnTypeStr == "generic" || returnTypeStr == "any" {
 									// Find the function node in the AST
@@ -581,14 +618,14 @@ func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
 									if st.AST != nil {
 										findFunc(st.AST)
 									}
-									
+
 									// Infer argument types from the call
 									var argTypes []string
 									for _, arg := range callNode.Children {
 										argType := inferExpressionType(arg, st.Doc)
 										argTypes = append(argTypes, argType)
 									}
-									
+
 									// Infer actual return types by tracing through function
 									if funcNode != nil && st.Doc != nil {
 										inferredTypes := inferFunctionReturnTypes(funcNode, argTypes, st.Doc)
@@ -599,11 +636,11 @@ func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
 								}
 							}
 						}
-						
+
 						// Parse and assign return types
 						if returnTypeStr != "" && returnTypeStr != "void" {
 							returnTypes := strings.Split(returnTypeStr, ",")
-							
+
 							// Find which position this variable is at
 							varIndex := -1
 							for i, child := range leftSide.Children {
@@ -612,14 +649,14 @@ func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
 									break
 								}
 							}
-							
+
 							// Use the corresponding return type if available
 							if varIndex >= 0 && varIndex < len(returnTypes) {
 								varType = strings.TrimSpace(returnTypes[varIndex])
 							}
 						}
 					}
-					
+
 					symbol := &Symbol{
 						Name:   varName,
 						Kind:   SymbolKindVariable,
@@ -630,7 +667,7 @@ func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
 					st.AddSymbol(symbol)
 				}
 			}
-			
+
 			// Walk right side to process the function call
 			st.walkNode(rightSide, depth+1)
 		}
@@ -652,9 +689,9 @@ func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
 			Name:   distinctName,
 			Kind:   SymbolKindDistinct,
 			Type:   node.DataType, // The base type
-				Line:   node.Line,
-				Column: 0,
-			}
+			Line:   node.Line,
+			Column: 0,
+		}
 		st.AddSymbol(dsymbol)
 
 	case ahoy.NODE_UNION_DECLARATION:
@@ -692,7 +729,7 @@ func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
 			if child.Type == ahoy.NODE_IDENTIFIER {
 				memberName := child.Value
 				memberValue := child.DataType
-				
+
 				// Calculate actual value
 				actualValue := ""
 				if memberValue == "" {
@@ -707,13 +744,13 @@ func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
 						nextAutoValue = val + 1
 					}
 				}
-				
+
 				// Add as field for completion
 				symbol.Fields[memberName] = &StructField{
 					Name: memberName,
 					Type: actualValue,
 				}
-				
+
 				// Add as enum value symbol
 				valueSymbol := &Symbol{
 					Name:   memberName,
@@ -791,13 +828,13 @@ func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
 				// First, copy parent struct's non-nested fields for inheritance
 				inheritedFields := make(map[string]*StructField)
 				var inheritedOrder []string
-				
+
 				// Track which fields the nested type overrides
 				nestedFieldSet := make(map[string]bool)
 				for _, nestedFieldName := range nestedField.FieldOrder {
 					nestedFieldSet[nestedFieldName] = true
 				}
-				
+
 				// Add parent fields that are NOT overridden by nested type
 				for parentFieldName, parentField := range symbol.Fields {
 					if parentField.Fields == nil && !nestedFieldSet[parentFieldName] {
@@ -817,7 +854,7 @@ func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
 					inheritedFields[nestedFieldName] = nestedFieldObj
 				}
 				inheritedOrder = append(inheritedOrder, nestedField.FieldOrder...)
-				
+
 				nestedSymbol := &Symbol{
 					Name:       structName + "." + typeName,
 					Kind:       SymbolKindStruct,
@@ -828,7 +865,7 @@ func (st *SymbolTable) walkNode(node *ahoy.ASTNode, depth int) {
 					FieldOrder: inheritedOrder,
 				}
 				st.AddSymbol(nestedSymbol)
-				
+
 				// ALSO add symbol with just the nested type name for easier lookup
 				nestedSymbolShort := &Symbol{
 					Name:       typeName,
@@ -997,7 +1034,7 @@ func formatDefaultValue(node *ahoy.ASTNode) string {
 	if node == nil {
 		return ""
 	}
-	
+
 	switch node.Type {
 	case ahoy.NODE_NUMBER:
 		return node.Value
@@ -1077,43 +1114,27 @@ func (st *SymbolTable) inferType(node *ahoy.ASTNode) string {
 			returnType := sym.Type
 
 			debugLog.Printf("DEBUG inferType: Function %s has return type: %s", funcName, returnType)
-			
+
 			// If function has infer/generic/any return type, actually infer it
 			if returnType == "infer" || returnType == "" || returnType == "generic" || returnType == "any" || strings.Contains(returnType, "generic") || strings.Contains(returnType, "any") {
 				debugLog.Printf("DEBUG inferType: Need to infer for %s", funcName)
-				
+
 				// Find the function node in the AST
-				var funcNode *ahoy.ASTNode
-				var findFunc func(*ahoy.ASTNode)
-				findFunc = func(n *ahoy.ASTNode) {
-					if n == nil {
-						return
-					}
-					if n.Type == ahoy.NODE_FUNCTION && n.Value == funcName {
-						funcNode = n
-						return
-					}
-					for _, child := range n.Children {
-						findFunc(child)
-					}
-				}
-				if st.AST != nil {
-					findFunc(st.AST)
-				}
-				
+				funcNode := st.functionDeclaration(funcName)
+
 				if funcNode != nil {
 					debugLog.Printf("DEBUG inferType: Found function node for %s", funcName)
 				}
-				
+
 				// Infer argument types from the call
 				var argTypes []string
 				for _, arg := range node.Children {
 					argType := inferExpressionType(arg, st.Doc)
 					argTypes = append(argTypes, argType)
 				}
-				
+
 				debugLog.Printf("DEBUG inferType: Argument types: %v", argTypes)
-				
+
 				// Infer actual return types by tracing through function
 				if funcNode != nil && st.Doc != nil {
 					inferredTypes := inferFunctionReturnTypes(funcNode, argTypes, st.Doc)
@@ -1125,14 +1146,14 @@ func (st *SymbolTable) inferType(node *ahoy.ASTNode) string {
 					}
 				}
 			}
-			
+
 			debugLog.Printf("DEBUG inferType: Returning original type: %s", returnType)
 			return returnType
 		}
 		// The callee may be declared later in the file: walkNode visits
 		// functions in source order, so it is not in the table yet. Read the
 		// explicit return type straight from its declaration.
-		if funcNode := findFunctionDeclaration(st.AST, funcName); funcNode != nil {
+		if funcNode := st.functionDeclaration(funcName); funcNode != nil {
 			return funcNode.DataType
 		}
 	}
@@ -1154,7 +1175,7 @@ func (st *SymbolTable) GetStructFields(typeName string) map[string]*StructField 
 			return allFields
 		}
 	}
-	
+
 	// Look up the struct type in Ahoy symbol table
 	sym := st.Lookup(typeName)
 	if sym == nil || sym.Kind != SymbolKindStruct {
@@ -1285,25 +1306,25 @@ func (st *SymbolTable) extractObjectLiteralFields(node *ahoy.ASTNode) map[string
 	}
 
 	fields := make(map[string]*StructField)
-	
+
 	// Iterate through object properties
 	for _, prop := range node.Children {
 		if prop.Type == ahoy.NODE_OBJECT_PROPERTY {
 			fieldName := prop.Value
 			fieldType := ""
-			
+
 			// Try to infer type from the property value
 			if len(prop.Children) > 0 {
 				fieldType = st.inferType(prop.Children[0])
 			}
-			
+
 			fields[fieldName] = &StructField{
 				Name: fieldName,
 				Type: fieldType,
 			}
 		}
 	}
-	
+
 	return fields
 }
 
@@ -1326,17 +1347,17 @@ func findFunctionDeclaration(root *ahoy.ASTNode, name string) *ahoy.ASTNode {
 }
 
 func findLastLine(node *ahoy.ASTNode) int {
-if node == nil {
-return 0
-}
+	if node == nil {
+		return 0
+	}
 
-maxLine := node.Line
-for _, child := range node.Children {
-childLine := findLastLine(child)
-if childLine > maxLine {
-maxLine = childLine
-}
-}
+	maxLine := node.Line
+	for _, child := range node.Children {
+		childLine := findLastLine(child)
+		if childLine > maxLine {
+			maxLine = childLine
+		}
+	}
 
-return maxLine
+	return maxLine
 }

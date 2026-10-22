@@ -6,25 +6,24 @@ This guide helps you test all the implemented LSP features.
 
 1. **Build the LSP server:**
    ```bash
-   cd /path/to/ahoy/lsp
+   cd /path/to/ahoy-lang/ahoy-lsp
    go build -o ahoy-lsp .
    ```
 
-2. **Install the binary:**
+2. **Install the command as a symlink, not a copy:**
    ```bash
-   # System-wide
-   sudo cp ahoy-lsp /usr/local/bin/
-
-   # Or user installation
-   mkdir -p ~/.local/bin
-   cp ahoy-lsp ~/.local/bin/
+   make install
    export PATH="$HOME/.local/bin:$PATH"
    ```
+
+   A symlink means the next build immediately replaces the binary the
+   installed command resolves to. A copied binary silently goes stale.
 
 3. **Verify installation:**
    ```bash
    which ahoy-lsp
-   # Should output: /usr/local/bin/ahoy-lsp
+   readlink -f "$(which ahoy-lsp)"
+   ahoy-lsp --version
    ```
 
 ## Implemented Features
@@ -88,21 +87,20 @@ end
 
 
 ? Type "el" and press Ctrl+Space
-? You should see: else, elseif
+? You should see: else, elif
 
 
-? Type "pl" and press Ctrl+Space
-? You should see: plus
+? Type "pr" and press Ctrl+Space
+? You should see: print, program
 
 
-? Type "ti" and press Ctrl+Space
-? You should see: times, true
+? Type "gu" and press Ctrl+Space
+? You should see: guard
 ```
 
 **Expected Results:**
 - Autocomplete popup appears with suggestions
-- Keywords: if, else, elseif, loop, func, return, etc.
-- Word operators: plus, minus, times, div, mod, etc.
+- Keywords: if, guard, else, elif, loop, return, etc.
 - Types: int, float, string, bool, dict, etc.
 
 **How to Test:**
@@ -122,7 +120,7 @@ end
 my_variable: 42
 
 func calculate x int y int do
-    result: x plus y
+    result: x + y
     return result
 end
 
@@ -175,7 +173,7 @@ name: "Alice"
 
 ? Function with return type
 func add x int y int -> int do
-    return x plus y
+    return x + y
 end
 
 ? Enum
@@ -195,12 +193,12 @@ end
 PI :: 3.14159
 
 ? Hover over keywords
-if age greater 18 then
+if age > 18 then
     ahoy "Adult"
 end
 
 ? Hover over operators
-result: 5 plus 3
+result: 5 + 3
 ```
 
 **Expected Results:**
@@ -229,10 +227,10 @@ if - Conditional statement
 Syntax: if condition then ... end
 ```
 
-Hovering over `plus` shows:
+Hovering over `guard` shows:
 ```
-plus - Addition operator (+)
-Syntax: result: a plus b
+guard - Guard clause: the condition must hold, or the else arm diverges
+Syntax: guard condition else return $
 ```
 
 **How to Test:**
@@ -265,7 +263,7 @@ func process data string do
 end
 
 func calculate x int y int -> int do
-    return x plus y
+    return x + y
 end
 
 ? Enums
@@ -355,20 +353,14 @@ if x is 5
     ahoy "test"
 end
 
-? Word operators - should offer conversion to symbols
-result: 5 plus 3        ? Offers: "Convert 'plus' to '+'"
-result2: 10 minus 2     ? Offers: "Convert 'minus' to '-'"
-result3: 4 times 5      ? Offers: "Convert 'times' to '*'"
-result4: 8 div 2        ? Offers: "Convert 'div' to '/'"
-
-? Word comparison - should offer conversion
+? Word equality - should offer conversion
 if x is 5 then          ? Offers: "Convert 'is' to '=='"
     ahoy "equal"
 end
 
 ? Function without docs - should offer "Add function documentation"
 func calculate x int y int do
-    return x plus y
+    return x + y
 end
 ```
 
@@ -380,13 +372,7 @@ end
    - See: "Add 'do' keyword"
    - Select it → `do` is inserted
 
-2. **Refactor word operators:**
-   - Place cursor on `plus`
-   - Press Ctrl+.
-   - See: "Convert 'plus' to '+'"
-   - Select it → line becomes: `result: 5 + 3`
-
-3. **Add documentation:**
+2. **Add documentation:**
    - Place cursor on function line
    - Press Ctrl+.
    - See: "Add function documentation"
@@ -509,7 +495,7 @@ EOF
 
 for i in {1..1000}; do
   echo "func test_$i x int do" >> large_test.ahoy
-  echo "    return x plus $i" >> large_test.ahoy
+  echo "    return x + $i" >> large_test.ahoy
   echo "end" >> large_test.ahoy
   echo "" >> large_test.ahoy
 done

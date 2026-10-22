@@ -19,7 +19,10 @@ func getSymbolTable(doc *Document) *SymbolTable {
 	return doc.SymbolTable
 }
 
-func (s *Server) publishDiagnostics(ctx context.Context, doc *Document) {
+// collectDiagnostics runs every semantic check for a document and returns the
+// diagnostics an editor should see. It is separate from publishing so tests
+// can exercise the exact set of checks Zed runs.
+func collectDiagnostics(doc *Document) []protocol.Diagnostic {
 	diagnostics := []protocol.Diagnostic{}
 
 	// Check for program declaration position
@@ -75,6 +78,10 @@ func (s *Server) publishDiagnostics(ctx context.Context, doc *Document) {
 			// Check for redundant manual defer frees (auto-freed variables)
 			redundantFreeDiags := checkRedundantDeferFrees(doc)
 			diagnostics = append(diagnostics, redundantFreeDiags...)
+
+			// Style hint: prefer `x is A, B` over `x is A or x is B`
+			orChainDiags := checkOrChainHint(doc)
+			diagnostics = append(diagnostics, orChainDiags...)
 
 			// Check for invalid free operations (parameters, stack variables)
 			invalidFreeDiags := checkInvalidFreeOperations(doc)
@@ -174,10 +181,14 @@ func (s *Server) publishDiagnostics(ctx context.Context, doc *Document) {
 		diagnostics = append(diagnostics, diagnostic)
 	}
 
+	return diagnostics
+}
+
+func (s *Server) publishDiagnostics(ctx context.Context, doc *Document) {
 	// Send diagnostics to the editor
 	params := protocol.PublishDiagnosticsParams{
 		URI:         doc.URI,
-		Diagnostics: diagnostics,
+		Diagnostics: collectDiagnostics(doc),
 	}
 
 	// Notify the client (no reply expected)
@@ -1240,10 +1251,15 @@ func checkUndefinedFunctions(doc *Document) []protocol.Diagnostic {
 		}
 	}
 
-	// Add C header functions (global imports - snake_case names)
+	// Add C header functions (global imports - snake_case names). Cache the
+	// converted names: the per-call check below must not run PascalToSnake over
+	// every C function again for every call expression.
+	var cFunctionNames map[string]bool
 	if doc.CHeaderGlobal != nil {
+		cFunctionNames = make(map[string]bool, len(doc.CHeaderGlobal.Functions))
 		for funcName := range doc.CHeaderGlobal.Functions {
 			snakeName := ahoy.PascalToSnake(funcName)
+			cFunctionNames[snakeName] = true
 			availableFuncs = append(availableFuncs, snakeName)
 		}
 	}
@@ -1281,15 +1297,7 @@ func checkUndefinedFunctions(doc *Document) []protocol.Diagnostic {
 				isUserDefined := sym != nil && (sym.Kind == SymbolKindFunction || sym.Kind == SymbolKindDistinct || ahoy.IsFunctionType(sym.Type))
 
 				// Check if it's a C function (global import)
-				isCFunction := false
-				if doc.CHeaderGlobal != nil {
-					for cFuncName := range doc.CHeaderGlobal.Functions {
-						if ahoy.PascalToSnake(cFuncName) == funcName {
-							isCFunction = true
-							break
-						}
-					}
-				}
+				isCFunction := cFunctionNames[funcName]
 
 				// Also check namespaced C functions (e.g., rl.function_name)
 				// These would come through as method calls, but we'll handle them separately
@@ -2777,6 +2785,58 @@ func checkTypeMismatches(doc *Document) []protocol.Diagnostic {
 }
 
 // inferExpressionType infers the type of an expression
+// cachedFunctionSignatures returns the document's function signatures, building
+// them at most once per AST. Type inference is called for every call expression
+// and binary operation, so rebuilding this map on each call was O(call sites ×
+// AST size).
+func (doc *Document) cachedFunctionSignatures() map[string]*FunctionSignature {
+	if doc == nil || doc.AST == nil {
+		return nil
+	}
+
+	doc.funcSigMu.Lock()
+	defer doc.funcSigMu.Unlock()
+
+	if doc.funcSignatures != nil && doc.funcSignaturesAST == doc.AST {
+		return doc.funcSignatures
+	}
+
+	signatures := make(map[string]*FunctionSignature)
+	var collectFunctions func(*ahoy.ASTNode)
+	collectFunctions = func(n *ahoy.ASTNode) {
+		if n == nil {
+			return
+		}
+		if n.Type == ahoy.NODE_FUNCTION {
+			sig := &FunctionSignature{
+				Name:       n.Value,
+				ReturnType: n.DataType,
+			}
+			if len(n.Children) > 0 && n.Children[0].Type == ahoy.NODE_BLOCK {
+				params := n.Children[0]
+				for _, param := range params.Children {
+					if param.Type == ahoy.NODE_IDENTIFIER {
+						sig.Parameters = append(sig.Parameters, ParameterInfo{
+							Name:       param.Value,
+							Type:       param.DataType,
+							HasDefault: param.DefaultValue != nil,
+						})
+					}
+				}
+			}
+			signatures[n.Value] = sig
+		}
+		for _, child := range n.Children {
+			collectFunctions(child)
+		}
+	}
+	collectFunctions(doc.AST)
+
+	doc.funcSignatures = signatures
+	doc.funcSignaturesAST = doc.AST
+	return signatures
+}
+
 func inferExpressionType(node *ahoy.ASTNode, doc *Document) string {
 	if node == nil {
 		return "unknown"
@@ -2863,39 +2923,11 @@ func inferExpressionType(node *ahoy.ASTNode, doc *Document) string {
 			}
 		}
 
-		// Build function signatures map if not already done
-		funcSignatures := make(map[string]*FunctionSignature)
-		if doc != nil && doc.AST != nil {
-			var collectFunctions func(*ahoy.ASTNode)
-			collectFunctions = func(n *ahoy.ASTNode) {
-				if n == nil {
-					return
-				}
-				if n.Type == ahoy.NODE_FUNCTION {
-					sig := &FunctionSignature{
-						Name:       n.Value,
-						ReturnType: n.DataType,
-					}
-					if len(n.Children) > 0 && n.Children[0].Type == ahoy.NODE_BLOCK {
-						params := n.Children[0]
-						for _, param := range params.Children {
-							if param.Type == ahoy.NODE_IDENTIFIER {
-								paramInfo := ParameterInfo{
-									Name:       param.Value,
-									Type:       param.DataType,
-									HasDefault: param.DefaultValue != nil,
-								}
-								sig.Parameters = append(sig.Parameters, paramInfo)
-							}
-						}
-					}
-					funcSignatures[n.Value] = sig
-				}
-				for _, child := range n.Children {
-					collectFunctions(child)
-				}
-			}
-			collectFunctions(doc.AST)
+		// Look up the function in the document's cached signature map. Walking
+		// the AST here for every call made this quadratic on large files.
+		var funcSignatures map[string]*FunctionSignature
+		if doc != nil {
+			funcSignatures = doc.cachedFunctionSignatures()
 		}
 
 		// Look up the function
@@ -3790,4 +3822,76 @@ func checkDuplicateConsts(doc *Document) []protocol.Diagnostic {
 	}
 
 	return diagnostics
+}
+
+// checkOrChainHint suggests the comma form `x is A, B` for
+// `x is A or x is B or ...` (any-of) and `x is not A, B` for
+// `x is not A and x is not B and ...` (none-of).
+func checkOrChainHint(doc *Document) []protocol.Diagnostic {
+	diagnostics := []protocol.Diagnostic{}
+	if doc.AST == nil {
+		return diagnostics
+	}
+
+	var walk func(*ahoy.ASTNode)
+	walk = func(node *ahoy.ASTNode) {
+		if node == nil {
+			return
+		}
+		if node.Type == ahoy.NODE_IF_STATEMENT && len(node.Children) > 0 {
+			cond := node.Children[0]
+			if isOrIsChain(cond) {
+				diag := protocol.Diagnostic{
+					Range: protocol.Range{
+						Start: protocol.Position{Line: uint32(cond.Line - 1), Character: uint32(cond.Column - 1)},
+						End:   protocol.Position{Line: uint32(cond.Line - 1), Character: uint32(cond.Column + 20)},
+					},
+					Severity: protocol.DiagnosticSeverityHint,
+					Source:   "ahoy",
+					Message:  "consider `x is A, B` instead of `x is A or x is B`",
+				}
+				diagnostics = append(diagnostics, diag)
+			}
+		}
+		for _, c := range node.Children {
+			walk(c)
+		}
+	}
+	walk(doc.AST)
+	return diagnostics
+}
+
+// isOrIsChain reports whether node is a binary `or` chain of two or more
+// `is` comparisons on the same subject (e.g. `x is A or x is B`).
+func isOrIsChain(node *ahoy.ASTNode) bool {
+	if node == nil || node.Type != ahoy.NODE_BINARY_OP || node.Value != "or" {
+		return false
+	}
+	// both sides must be `is` comparisons on the same subject
+	left := node.Children[0]
+	right := node.Children[1]
+	if left == nil || right == nil {
+		return false
+	}
+	// right may itself be an `or` chain
+	rightIsChain := isOrIsChain(right)
+	if !rightIsChain {
+		if right.Type != ahoy.NODE_BINARY_OP || right.Value != "is" {
+			return false
+		}
+	}
+	if left.Type != ahoy.NODE_BINARY_OP || left.Value != "is" {
+		return false
+	}
+	// same subject
+	if len(left.Children) < 1 || len(right.Children) < 1 {
+		return false
+	}
+	if left.Children[0] == nil || right.Children[0] == nil {
+		return false
+	}
+	if left.Children[0].Value != right.Children[0].Value {
+		return false
+	}
+	return true
 }

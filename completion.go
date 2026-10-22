@@ -460,7 +460,7 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 
 	// Add keyword completions (only if not dot completion)
 	keywords := []string{
-		"if", "else", "elseif", "anif", "then",
+		"if", "guard", "else", "elif", "then",
 		"loop", "in", "to", "do",
 		"func", "return",
 		"switch", "on",
@@ -484,30 +484,6 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 				Label:  kw,
 				Kind:   protocol.CompletionItemKindKeyword,
 				Detail: "keyword",
-			})
-		}
-	}
-
-	// Add operator completions (word-based operators)
-	operators := []struct {
-		label  string
-		detail string
-	}{
-		{"plus", "addition operator (+)"},
-		{"minus", "subtraction operator (-)"},
-		{"times", "multiplication operator (*)"},
-		{"div", "division operator (/)"},
-		{"mod", "modulo operator (%)"},
-		{"lesser", "less than operator (<)"},
-		{"greater", "greater than operator (>)"},
-	}
-
-	for _, op := range operators {
-		if prefix == "" || strings.HasPrefix(op.label, prefix) {
-			items = append(items, protocol.CompletionItem{
-				Label:  op.label,
-				Kind:   protocol.CompletionItemKindOperator,
-				Detail: op.detail,
 			})
 		}
 	}
@@ -712,7 +688,7 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 			}
 		}
 	}
-	
+
 	// Add user-defined structs (case-insensitive matching)
 	// Use PackageSymbols if available (includes all files in package), otherwise use SymbolTable
 	var structSymbolTable *SymbolTable
@@ -721,7 +697,7 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 	} else {
 		structSymbolTable = doc.SymbolTable
 	}
-	
+
 	if structSymbolTable != nil && structSymbolTable.GlobalScope != nil {
 		for name, sym := range structSymbolTable.GlobalScope.Symbols {
 			if sym.Kind == SymbolKindStruct {

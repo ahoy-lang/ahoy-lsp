@@ -177,10 +177,10 @@ go build -o ahoy-lsp .
 switch number on
     1 to 5:
         print|"Small"|
-        x: int = number times 2
+        x: int = number * 2
     6 to 10:
         print|"Medium"|
-        x: int = number times 3
+        x: int = number * 3
     _:
         print|"Other"|
 $
@@ -200,7 +200,7 @@ else print|"normal"|  ? Colon optional
 ### Function Parameters ✅
 ```ahoy
 myFunc :: |a:int, b:float| infer:
-    result: int = a times 2
+    result: int = a * 2
     return result, b  ? Parameters are visible!
 $
 ```

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -20,12 +21,67 @@ import (
 
 var debugLog *log.Logger
 
+// lspVersion reports the running executable and its VCS revision. Comparing
+// this with `ls -l ~/.local/bin/ahoy-lsp` makes a stale installed copy obvious.
+func lspVersion() string {
+	version := "dev"
+	revision := ""
+	modified := ""
+	commitTime := ""
+	if info, ok := debug.ReadBuildInfo(); ok {
+		for _, setting := range info.Settings {
+			switch setting.Key {
+			case "vcs.revision":
+				revision = setting.Value
+			case "vcs.modified":
+				modified = setting.Value
+			case "vcs.time":
+				commitTime = setting.Value
+			}
+		}
+	}
+	parts := []string{"ahoy-lsp " + version}
+	if revision != "" {
+		parts = append(parts, "revision "+revision)
+	}
+	if modified != "" {
+		parts = append(parts, "modified "+modified)
+	}
+	if commitTime != "" {
+		parts = append(parts, "commit "+commitTime)
+	}
+	exe, err := os.Executable()
+	if err == nil {
+		if resolved, resolveErr := filepath.EvalSymlinks(exe); resolveErr == nil {
+			exe = resolved
+		}
+		parts = append(parts, "binary "+exe)
+	}
+	return strings.Join(parts, "\n  ")
+}
+
 func init() {
-	// Initialize debug logger to stderr
-	debugLog = log.New(os.Stderr, "[ahoy-lsp] ", log.LstdFlags)
+	// Debug logging is opt-in. The server logs per-symbol and per-lookup lines
+	// while parsing a large file; writing them to stderr costs more than the
+	// work being logged and floods the editor's LSP log. Set AHOY_LSP_DEBUG=1
+	// (or any non-empty value other than 0/false) to enable it.
+	out := io.Discard
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("AHOY_LSP_DEBUG"))) {
+	case "", "0", "false", "no", "off":
+	default:
+		out = os.Stderr
+	}
+	debugLog = log.New(out, "[ahoy-lsp] ", log.LstdFlags)
 }
 
 func main() {
+	// Check for version mode. This is how to confirm that the command an
+	// editor starts (usually ~/.local/bin/ahoy-lsp) is the freshly built one.
+	if len(os.Args) > 1 && (os.Args[1] == "--version" || os.Args[1] == "-version") {
+		fmt.Println(lspVersion())
+		return
+	}
+
 	// Check for CLI validate mode
 	if len(os.Args) > 1 && os.Args[1] == "--validate" {
 		if len(os.Args) < 3 {
@@ -78,46 +134,13 @@ func main() {
 	debugLog.Println("Shutting down cleanly")
 }
 
-// siblingDeclaredNames returns the top-level names declared by the other files
-// of the same program in the same directory. It returns nil when the file is
-// not part of a multi-file program.
-func siblingDeclaredNames(filename string, ast *ahoy.ASTNode) ([]string, []*ahoy.ASTNode) {
-	programName := extractProgramName(ast)
-	if programName == "" {
-		return nil, nil
-	}
-
-	dir := filepath.Dir(filename)
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil, nil
-	}
-
-	var names []string
-	var methodASTs []*ahoy.ASTNode
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".ahoy") {
-			continue
-		}
-		path := filepath.Join(dir, entry.Name())
-		if path == filename {
-			continue
-		}
-		other, err := os.ReadFile(path)
-		if err != nil {
-			continue
-		}
-		otherAst, _ := ahoy.ParseLintWithPath(ahoy.Tokenize(string(other)), path)
-		if otherAst == nil || extractProgramName(otherAst) != programName {
-			continue
-		}
-		names = append(names, ahoy.DeclaredNames(otherAst)...)
-		methodASTs = append(methodASTs, otherAst)
-	}
-	return names, methodASTs
-}
-
 func runValidate(filename string) {
+	// Work with an absolute path: the compiler and import resolver both use
+	// the file's directory as the base for relative imports.
+	if abs, absErr := filepath.Abs(filename); absErr == nil {
+		filename = abs
+	}
+
 	// Read file
 	content, err := os.ReadFile(filename)
 	if err != nil {
@@ -127,60 +150,55 @@ func runValidate(filename string) {
 
 	// Import ahoy package
 	tokens := ahoy.Tokenize(string(content))
-	// Use ParseLintWithPath to support relative imports
-	ast, parseErrors := ahoy.ParseLintWithPath(tokens, filename)
+	// Parse syntax first; the semantic checks need every name declared by the
+	// program's siblings and imports, so they run after loadPackageFiles in
+	// revalidateWithProgramNames.
+	ast, parseErrors := ahoy.ParseSyntaxWithPath(tokens, filename)
 
-	// A file that belongs to a multi-file program must be validated with its
-	// siblings' names in scope, or every call to a function declared in a
-	// sibling file is reported as undefined. The compiler's -lint does the
-	// same; ParseLintWithPathInProgram is the entry point for it.
-	if names, methodASTs := siblingDeclaredNames(filename, ast); len(names) > 0 {
-		ast, parseErrors = ahoy.ParseLintWithPathInProgram(tokens, filename, names, ahoy.CollectMethods(methodASTs...))
+	doc := &Document{
+		URI:     uri.URI("file://" + filename),
+		Content: string(content),
+		Lines:   splitLines(string(content)),
+		Tokens:  tokens,
+		AST:     ast,
+		Errors:  parseErrors,
+	}
+
+	// A file that belongs to a program must be validated with every name the
+	// program declares: same-directory siblings and recursive imports. The
+	// compiler's -lint does the same; ParseLintWithPathInProgram is its entry
+	// point. loadPackageFiles builds that context, and revalidateWithProgramNames
+	// reruns the semantic checks with the merged names.
+	if doc.AST != nil {
+		doc.SymbolTable = BuildSymbolTableWithFile(doc.AST, string(doc.URI))
+		doc.CHeaders, doc.CHeaderGlobal = extractCHeaderInfoWithURI(doc.AST, doc.URI)
+		doc.ProgramName = extractProgramName(doc.AST)
+		dummyServer := &Server{
+			documents: make(map[uri.URI]*Document),
+		}
+		dummyServer.loadPackageFiles(doc)
+		dummyServer.revalidateWithProgramNames(doc)
 	}
 
 	// Check syntax errors. Warnings print but do not fail validation: only
 	// fatal diagnostics exit nonzero.
 	fatals := 0
-	for _, err := range parseErrors {
+	for _, err := range doc.Errors {
 		if !err.IsWarning() {
 			fatals++
 		}
 	}
 	if fatals > 0 {
 		fmt.Printf("Found %d syntax error(s) in %s:\n", fatals, filename)
-		for _, err := range parseErrors {
+		for _, err := range doc.Errors {
 			fmt.Printf("  Line %d, Column %d: %s\n", err.Line, err.Column, err.Message)
 		}
 		os.Exit(1)
 	}
 
-	if ast == nil {
+	if doc.AST == nil {
 		fmt.Printf("✓ No errors found in %s\n", filename)
 		return
-	}
-
-	// Build symbol table
-	doc := &Document{
-		URI:     uri.URI("file://" + filename),
-		Content: string(content),
-		Lines:   splitLines(string(content)),
-		AST:     ast,
-	}
-	doc.SymbolTable = BuildSymbolTableWithFile(ast, string(doc.URI))
-
-	// Parse C headers from imports - use file URI for path resolution
-	doc.CHeaders, doc.CHeaderGlobal = extractCHeaderInfoWithURI(ast, doc.URI)
-
-	// Extract program name and load package files for multi-file validation
-	if doc.AST != nil {
-		doc.ProgramName = extractProgramName(doc.AST)
-		if doc.ProgramName != "" {
-			// Create a minimal server just for loading package files
-			dummyServer := &Server{
-				documents: make(map[uri.URI]*Document),
-			}
-			dummyServer.loadPackageFiles(doc)
-		}
 	}
 
 	// Run all diagnostic checks (same as publishDiagnostics)

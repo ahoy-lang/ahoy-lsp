@@ -46,12 +46,24 @@ ahoy-lang/
 ```bash
 # From the ahoy-lsp directory
 go mod tidy           # Download dependencies
-go build              # Build ahoy-lsp binary
-./build.sh            # Alternative: use build script
+go build -o ahoy-lsp . # Build the repository artifact
+make install          # Build, then install the symlink below
+./build.sh            # Alternative: use the build script
 
-# Install to ~/.local/bin (recommended for editor integration)
-go build -o ~/.local/bin/ahoy-lsp
+# Do NOT copy the binary into ~/.local/bin. A copy goes stale as soon as the
+# next build replaces ahoy-lsp, and editors will keep running the old server.
 ```
+
+`make install` (and `build.sh`) installs a symlink:
+
+```
+~/.local/bin/ahoy-lsp -> /path/to/ahoy-lang/ahoy-lsp/ahoy-lsp
+```
+
+Every later `go build -o ahoy-lsp .` or `make` updates the file that the
+symlink points at, so the installed command never disagrees with the
+repository. Restart the editor (or its language server) after a rebuild: a
+running process keeps the binary image it was started with.
 
 ### Build Script
 
@@ -64,8 +76,16 @@ chmod +x build.sh
 
 This will:
 1. Build the `ahoy-lsp` binary
-2. Install it to `~/.local/bin/ahoy-lsp`
-3. Make it executable
+2. Symlink `~/.local/bin/ahoy-lsp` to it
+3. Warn about stale copied binaries in other PATH directories
+
+Verify what an editor will actually run:
+
+```bash
+which ahoy-lsp
+readlink -f "$(which ahoy-lsp)"
+ahoy-lsp --version
+```
 
 ## Installation
 
@@ -95,17 +115,17 @@ cp -r extension.toml languages grammars target/wasm32-wasi/release/zed_ahoy.wasm
 ### Manual Installation (Any Editor)
 
 ```bash
-# Build and install
+# Build and install a symlink (never copy: a copy goes stale)
 cd ahoy-lsp
-go build -o ~/.local/bin/ahoy-lsp
-chmod +x ~/.local/bin/ahoy-lsp
+make install
 
 # Ensure ~/.local/bin is in your PATH
 export PATH="$HOME/.local/bin:$PATH"
 
-# Verify installation
-ahoy-lsp --version  # (if version flag is implemented)
-which ahoy-lsp      # Should show ~/.local/bin/ahoy-lsp
+# Verify installation: --version prints the resolved binary path
+ahoy-lsp --version
+which ahoy-lsp
+readlink -f "$(which ahoy-lsp)"
 ```
 
 ## Usage
@@ -122,7 +142,7 @@ The server will:
 1. Read LSP protocol messages from stdin
 2. Parse Ahoy code using the imported parser
 3. Send responses and notifications to stdout
-4. Log debug information to stderr
+4. Log debug information to stderr when `AHOY_LSP_DEBUG=1` is set
 
 ### Testing
 
@@ -189,13 +209,14 @@ var err ahoy.ParseError
 
 ### Debugging
 
-Enable debug output by checking stderr when running the LSP:
+Debug logging is opt-in because the server logs per-symbol details that are
+expensive to write while parsing large files:
 
 ```bash
-# The server logs to stderr
-ahoy-lsp 2>debug.log
+# Enable verbose logging to stderr
+AHOY_LSP_DEBUG=1 ahoy-lsp 2>debug.log
 
-# Or in your editor, check the language server output channel
+# Or in your editor, set AHOY_LSP_DEBUG=1 for the server's environment
 ```
 
 Common log messages:
@@ -215,9 +236,9 @@ Common log messages:
 # Verify the binary exists
 which ahoy-lsp
 
-# If not found, rebuild and install
+# If not found, rebuild and install the symlink
 cd ahoy-lsp
-go build -o ~/.local/bin/ahoy-lsp
+make install
 
 # Ensure PATH includes ~/.local/bin
 export PATH="$HOME/.local/bin:$PATH"

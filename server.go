@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -32,6 +31,13 @@ type Document struct {
 	PackageFiles   map[uri.URI]*PackageFile     // Other files in the same package
 	PackageSymbols *SymbolTable                 // Merged symbol table from all package files
 	InferredParams map[string][]string          // function name -> inferred parameter types
+
+	// funcSignatures caches the signature map inferExpressionType needs. It is
+	// rebuilt whenever AST changes, because walking the whole tree for every
+	// call expression made diagnostics quadratic on large files.
+	funcSignatures    map[string]*FunctionSignature
+	funcSignaturesAST *ahoy.ASTNode
+	funcSigMu         sync.Mutex
 }
 
 type PackageFile struct {
@@ -39,12 +45,22 @@ type PackageFile struct {
 	Content string
 	AST     *ahoy.ASTNode
 	Symbols *SymbolTable
+	// IsImport distinguishes a package resolved through import from a
+	// same-directory sibling of the current program. Duplicate-definition
+	// checks apply within a package, not between a program and its imports.
+	IsImport bool
 }
 
 type Server struct {
 	conn      jsonrpc2.Conn
 	documents map[uri.URI]*Document
 	mu        sync.RWMutex
+
+	// Parsed imported files are reused between edits. Without this, every
+	// keystroke reparses the whole imported engine (tens of thousands of
+	// lines) just to rebuild the names already known from the previous edit.
+	contextMu    sync.Mutex
+	contextCache map[string]*contextFileData
 }
 
 func NewServer(conn jsonrpc2.Conn) *Server {
@@ -157,13 +173,13 @@ func (s *Server) handleInitialize(ctx context.Context, reply jsonrpc2.Replier, r
 	if err != nil {
 		return reply(ctx, result, nil)
 	}
-	
+
 	// Add inlayHintProvider capability
 	var resultMap map[string]interface{}
 	if err := json.Unmarshal(resultJSON, &resultMap); err != nil {
 		return reply(ctx, result, nil)
 	}
-	
+
 	if capabilities, ok := resultMap["capabilities"].(map[string]interface{}); ok {
 		capabilities["inlayHintProvider"] = true
 	}
@@ -222,8 +238,8 @@ func (s *Server) handleDidOpen(ctx context.Context, reply jsonrpc2.Replier, req 
 		if strings.HasPrefix(filePath, "file://") {
 			filePath = strings.TrimPrefix(filePath, "file://")
 		}
-		doc.AST, doc.Errors = ahoy.ParseLintWithPath(doc.Tokens, filePath)
-		debugLog.Printf("Parsed: %d errors", len(doc.Errors))
+		doc.AST, doc.Errors = ahoy.ParseSyntaxWithPath(doc.Tokens, filePath)
+		debugLog.Printf("Parsed (syntax): %d errors", len(doc.Errors))
 		parseSuccess = true
 	}()
 
@@ -262,7 +278,7 @@ func (s *Server) handleDidOpen(ctx context.Context, reply jsonrpc2.Replier, req 
 
 		debugLog.Printf("Building symbol table...")
 		doc.SymbolTable = BuildSymbolTableWithFile(doc.AST, string(doc.URI), doc.InferredParams)
-		doc.SymbolTable.Doc = doc // Set document reference
+		doc.SymbolTable.Doc = doc                             // Set document reference
 		doc.SymbolTable.InferredReturns = inferredReturnTypes // Store resolved return types
 		debugLog.Printf("Symbol table built")
 
@@ -293,10 +309,8 @@ func (s *Server) handleDidOpen(ctx context.Context, reply jsonrpc2.Replier, req 
 	// Extract program name and load package files
 	if doc.AST != nil {
 		doc.ProgramName = extractProgramName(doc.AST)
-		if doc.ProgramName != "" {
-			debugLog.Printf("Program name: %s, loading package files...", doc.ProgramName)
-			s.loadPackageFiles(doc)
-		}
+		debugLog.Printf("Program name: %q, loading program context...", doc.ProgramName)
+		s.loadPackageFiles(doc)
 		s.revalidateWithProgramNames(doc)
 	}
 
@@ -386,8 +400,8 @@ func (s *Server) handleDidChange(ctx context.Context, reply jsonrpc2.Replier, re
 			if strings.HasPrefix(filePath, "file://") {
 				filePath = strings.TrimPrefix(filePath, "file://")
 			}
-			doc.AST, doc.Errors = ahoy.ParseLintWithPath(doc.Tokens, filePath)
-			debugLog.Printf("Parsed on change: %d errors", len(doc.Errors))
+			doc.AST, doc.Errors = ahoy.ParseSyntaxWithPath(doc.Tokens, filePath)
+			debugLog.Printf("Parsed (syntax) on change: %d errors", len(doc.Errors))
 			parseSuccess = true
 		}()
 
@@ -420,7 +434,7 @@ func (s *Server) handleDidChange(ctx context.Context, reply jsonrpc2.Replier, re
 			doc.SymbolTable.Doc = doc // Set document reference
 			// Extract C header imports
 			doc.CHeaders, doc.CHeaderGlobal = extractCHeaderInfoWithURI(doc.AST, doc.URI)
-			
+
 			// Check if program name changed
 			newProgramName := extractProgramName(doc.AST)
 			if newProgramName != doc.ProgramName {
@@ -433,11 +447,11 @@ func (s *Server) handleDidChange(ctx context.Context, reply jsonrpc2.Replier, re
 				}
 				doc.ProgramName = newProgramName
 			}
-			
-			// Reload package files if there's a program name
-			if doc.ProgramName != "" {
-				s.loadPackageFiles(doc)
-			}
+
+			// Reload the program context. Sibling files only join when
+			// there is a program declaration, but imports apply to
+			// headerless library files too.
+			s.loadPackageFiles(doc)
 			s.revalidateWithProgramNames(doc)
 		} else {
 			doc.SymbolTable = NewSymbolTable()
@@ -602,16 +616,26 @@ func extractProgramName(ast *ahoy.ASTNode) string {
 	return ""
 }
 
-// revalidateWithProgramNames re-runs the semantic checks with the names the
+// revalidateWithProgramNames runs the semantic checks with the names the
 // program's other files declare.
 //
-// The initial parse uses ParseLintWithPath, which knows only this file, so a
-// function or constant declared in a sibling file would be reported as
-// undefined. loadPackageFiles has already parsed those siblings; passing their
-// declared names to ParseLintWithPathInProgram is the same thing the
-// compiler's -lint does for a multi-file program.
+// The document is first parsed with ParseSyntaxWithPath, which knows only this
+// file and deliberately does not run the semantic checks. Those checks would
+// report every function or constant declared in a sibling file or an imported
+// package as undefined, and generating suggestions for thousands of names is
+// the most expensive part of a full parse. loadPackageFiles has already parsed
+// those files; passing their declared names to ParseLintWithPathInProgram is the
+// same thing the compiler's -lint does for a whole program.
 func (s *Server) revalidateWithProgramNames(doc *Document) {
-	if doc == nil || doc.AST == nil || len(doc.Tokens) == 0 || len(doc.PackageFiles) == 0 {
+	if doc == nil || doc.AST == nil || len(doc.Tokens) == 0 {
+		return
+	}
+
+	filePath := strings.TrimPrefix(string(doc.URI), "file://")
+
+	// A single-file program (or a script) has no external names to add.
+	if len(doc.PackageFiles) == 0 {
+		doc.AST, doc.Errors = ahoy.ParseLintWithPath(doc.Tokens, filePath)
 		return
 	}
 
@@ -627,109 +651,7 @@ func (s *Server) revalidateWithProgramNames(doc *Document) {
 		}
 	}
 
-	filePath := strings.TrimPrefix(string(doc.URI), "file://")
-	_, doc.Errors = ahoy.ParseLintWithPathInProgram(doc.Tokens, filePath, names, ahoy.CollectMethods(methodASTs...))
-}
-
-// loadPackageFiles loads other .ahoy files in the same directory with the same program name
-func (s *Server) loadPackageFiles(doc *Document) {
-	// Get directory from URI. A relative filename has no '/', so fall back to
-	// the parent of the absolute path rather than slicing at -1.
-	filePath := strings.TrimPrefix(string(doc.URI), "file://")
-	slash := strings.LastIndex(filePath, "/")
-	if slash < 0 {
-		if abs, err := filepath.Abs(filePath); err == nil {
-			filePath = abs
-			slash = strings.LastIndex(filePath, "/")
-		}
-	}
-	if slash < 0 {
-		return
-	}
-	dir := filePath[:slash]
-	selfPath := filepath.Clean(filePath)
-
-	// Read directory
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		debugLog.Printf("Error reading directory %s: %v", dir, err)
-		return
-	}
-
-	doc.PackageFiles = make(map[uri.URI]*PackageFile)
-
-	// Load all .ahoy files with matching program name
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".ahoy") {
-			continue
-		}
-
-		// filepath.Join, not string concatenation, and compare resolved paths
-		// rather than URIs: "file://./main.ahoy" and "file://main.ahoy" both name
-		// the current document, and a mismatch loaded the file as its own sibling
-		// and reported every function as defined twice.
-		siblingPath := filepath.Join(dir, entry.Name())
-		if filepath.Clean(siblingPath) == selfPath {
-			continue
-		}
-		fileURI := uri.URI("file://" + siblingPath)
-
-		// Read file content
-		content, err := os.ReadFile(siblingPath)
-		if err != nil {
-			debugLog.Printf("Error reading file %s: %v", entry.Name(), err)
-			continue
-		}
-
-		// Parse file
-		tokens := ahoy.Tokenize(string(content))
-		ast, _ := ahoy.ParseLintWithPath(tokens, siblingPath)
-
-		// Check if it has the same program name
-		progName := extractProgramName(ast)
-		if progName != doc.ProgramName {
-			continue
-		}
-
-		// Build symbol table for this file with file path tracking
-		symbols := BuildSymbolTableWithFile(ast, string(fileURI))
-
-		// Add to package files
-		doc.PackageFiles[fileURI] = &PackageFile{
-			URI:     fileURI,
-			Content: string(content),
-			AST:     ast,
-			Symbols: symbols,
-		}
-
-		debugLog.Printf("Loaded package file: %s", entry.Name())
-	}
-
-	// Only build a merged table when there really are sibling files. For a
-	// single document the symbol table built for that document is already
-	// correct, and a merged copy used to flatten function scopes (a same-named
-	// local in one function shadowed another regardless of position).
-	if len(doc.PackageFiles) == 0 {
-		doc.PackageSymbols = nil
-		return
-	}
-
-	// Merge symbol tables from all package files
-	doc.PackageSymbols = NewSymbolTable()
-
-	// Add symbols from current file
-	if doc.SymbolTable != nil {
-		mergeSymbolTable(doc.PackageSymbols.GlobalScope, doc.SymbolTable.GlobalScope)
-	}
-
-	// Add symbols from other package files
-	for _, pkgFile := range doc.PackageFiles {
-		if pkgFile.Symbols != nil {
-			mergeSymbolTable(doc.PackageSymbols.GlobalScope, pkgFile.Symbols.GlobalScope)
-		}
-	}
-
-	debugLog.Printf("Merged package symbols from %d files", len(doc.PackageFiles)+1)
+	doc.AST, doc.Errors = ahoy.ParseLintWithPathInProgram(doc.Tokens, filePath, names, ahoy.CollectMethods(methodASTs...))
 }
 
 // mergeSymbolTable merges symbols from src into dst. Child scopes are cloned as
