@@ -522,7 +522,7 @@ func checkConstMethodCalls(doc *Document) []protocol.Diagnostic {
 // getValidStringMethods returns list of valid string methods
 func getValidStringMethods() []string {
 	return []string{
-		"length", "upper", "lower", "replace", "contains",
+		"length", "upper", "lower", "replace", "contains", "contains_ci",
 		"camel_case", "snake_case", "pascal_case", "kebab_case",
 		"match", "split", "count", "lpad", "rpad", "pad", "strip", "get_file",
 	}
@@ -1198,6 +1198,13 @@ var builtinFunctions = []string{
 	"abs", "min", "max", "clamp", "lerp", "sign", "floor", "ceil",
 	"round", "sqrt", "pow", "hypot", "mod",
 	"rect_contains", "rect_intersects",
+	// paths, filesystem, clock/place, processes (Tier-1 stdlib)
+	"path_join", "path_parent", "path_name", "path_ends_with",
+	"fs_exists", "fs_is_dir", "fs_mkdir", "fs_mkdirp", "fs_write",
+	"fs_remove", "fs_copy", "fs_rename", "fs_list", "fs_mtime",
+	"fs_read_text",
+	"clock_string", "clock_ms", "cwd", "exe_dir",
+	"spawn_detached", "pid_alive", "proc_kill", "open_folder",
 }
 
 // isBuiltinFunction checks if a function name is a built-in function
