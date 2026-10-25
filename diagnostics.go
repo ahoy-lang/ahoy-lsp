@@ -92,9 +92,9 @@ func collectDiagnostics(doc *Document) []protocol.Diagnostic {
 			returnCountDiags := checkReturnValueCounts(doc)
 			diagnostics = append(diagnostics, returnCountDiags...)
 
-			// Check for duplicate heap-allocated variable returns
-			duplicateReturnDiags := checkDuplicateReturns(doc)
-			diagnostics = append(diagnostics, duplicateReturnDiags...)
+			// (duplicate-variable returns intentionally unchecked: returning
+			// the same value twice, e.g. `return 1, rad, rad, rad, ...`,
+			// is legitimate tuple construction, not a bug.)
 
 			// Check for type typos
 			typeTypoDiags := checkTypeTypos(doc)
