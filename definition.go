@@ -114,8 +114,11 @@ func loadStdlib() {
 				// Parse method definitions in API section
 				// Format: array.push|arr:array, value:any| ? -> array
 				// Format: print|value:any| ? -> void
-				if trimmed != "" && !strings.HasPrefix(trimmed, "?") && strings.Contains(trimmed, "|") {
-					parseAPIMethodLine(trimmed, currentCategory, lineNum)
+				// Signature lines are `? `-prefixed doc comments (file stays valid
+				// Ahoy); strip one marker before reading. Unprefixed lines from
+				// older caches still parse as before.
+				if sig := strings.TrimSpace(strings.TrimPrefix(trimmed, "?")); sig != "" && strings.Contains(sig, "|") {
+					parseAPIMethodLine(sig, currentCategory, lineNum)
 				}
 			}
 		}

@@ -196,6 +196,25 @@ func (s *Server) handleDidOpen(ctx context.Context, reply jsonrpc2.Replier, req 
 
 	debugLog.Printf("DidOpen: %s (size: %d bytes)", params.TextDocument.URI, len(params.TextDocument.Text))
 
+	// Only Ahoy sources are parsed here. Zed routes .ahoy files to this
+	// server, but a misassociated buffer (e.g. a C header opened with the
+	// Ahoy language) would otherwise produce nonsense "Unexpected token"
+	// diagnostics from the Ahoy parser. Unsaved buffers (no file extension)
+	// still pass through.
+	if lang := string(params.TextDocument.LanguageID); lang != "" && lang != "ahoy" {
+		debugLog.Printf("DidOpen: ignoring non-ahoy languageId %q", lang)
+		return reply(ctx, nil, nil)
+	}
+	if uri := string(params.TextDocument.URI); strings.Contains(uri, ".") {
+		lower := strings.ToLower(uri)
+		if strings.HasSuffix(lower, ".h") || strings.HasSuffix(lower, ".c") ||
+			strings.HasSuffix(lower, ".hpp") || strings.HasSuffix(lower, ".cpp") ||
+			strings.HasSuffix(lower, ".cc") || strings.HasSuffix(lower, ".cxx") {
+			debugLog.Printf("DidOpen: ignoring C/C++ file %s", uri)
+			return reply(ctx, nil, nil)
+		}
+	}
+
 	// Safety check: prevent opening extremely large files
 	if len(params.TextDocument.Text) > 5000000 {
 		debugLog.Printf("File too large, skipping parsing: %d bytes", len(params.TextDocument.Text))
