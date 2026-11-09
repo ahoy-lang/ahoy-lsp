@@ -100,10 +100,11 @@ func collectDiagnostics(doc *Document) []protocol.Diagnostic {
 			typeTypoDiags := checkTypeTypos(doc)
 			diagnostics = append(diagnostics, typeTypoDiags...)
 
-			// Check function call argument types (disabled: best-effort inference
+			// (checkFunctionCallArgumentTypes disabled: best-effort inference
 			// produces false positives on C/raylib types and case differences;
-			// the compiler does not enforce argument types, so these are noise)
-			_ = checkFunctionCallArgumentTypes(doc)
+			// the compiler does not enforce argument types, so these are noise.
+			// It was previously called twice per edit - once for real and once
+			// discarded - doubling the cost on large files.)
 
 			// Check for duplicate function definitions across package files
 			duplicateFuncDiags := checkDuplicateFunctionDefinitions(doc)

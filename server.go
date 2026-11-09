@@ -354,141 +354,162 @@ func (s *Server) handleDidChange(ctx context.Context, reply jsonrpc2.Replier, re
 
 	debugLog.Printf("DidChange: %s", params.TextDocument.URI)
 
-	s.mu.Lock()
-	doc := s.documents[params.TextDocument.URI]
-	if doc == nil {
-		s.mu.Unlock()
+	// Grab the document pointer and content under lock, then release the
+	// lock for the expensive reparse. Holding s.mu across tokenize/parse/
+	// symbol-table/package-load (seconds on bell/editor/main.ahoy with its
+	// engine imports) serialises every other LSP request behind the edit:
+	// Zed queues hover/completion/definition plus the next keystroke's
+	// didChange, keeps a buffer snapshot per queued request ("no snapshots
+	// found", "oneshot canceled" in Zed's log), and its heap grows
+	// gigabytes in minutes. Parse without the lock and swap the finished
+	// document back under lock; stale (superseded) versions are dropped.
+	if len(params.ContentChanges) == 0 {
+		return reply(ctx, nil, nil)
+	}
+	newContent := params.ContentChanges[0].Text
+	newVersion := params.TextDocument.Version
+	docURI := params.TextDocument.URI
+
+	// Safety check: prevent extremely large files from causing issues
+	if len(newContent) > 5000000 {
+		debugLog.Printf("File too large after change, skipping reparse: %d bytes", len(newContent))
+		return reply(ctx, nil, nil)
+	}
+
+	s.mu.RLock()
+	oldDoc := s.documents[docURI]
+	s.mu.RUnlock()
+	if oldDoc == nil {
 		return reply(ctx, nil, fmt.Errorf("document not found"))
 	}
 
-	// Full sync - replace entire content
-	if len(params.ContentChanges) > 0 {
-		debugLog.Printf("Content size: %d bytes", len(params.ContentChanges[0].Text))
+	// Build the new document off-lock so concurrent readers see the last
+	// good version until the swap.
+	newDoc := &Document{
+		URI:     docURI,
+		Content: newContent,
+		Lines:   strings.Split(newContent, "\n"),
+		Version: newVersion,
+	}
 
-		// Safety check: prevent extremely large files from causing issues
-		if len(params.ContentChanges[0].Text) > 5000000 {
-			debugLog.Printf("File too large after change, skipping reparse: %d bytes", len(params.ContentChanges[0].Text))
-			s.mu.Unlock()
-			return reply(ctx, nil, nil)
-		}
-		// Explicitly clear old data to help GC and prevent memory leaks
-		if doc.SymbolTable != nil {
-			doc.SymbolTable.Clear()
-			doc.SymbolTable = nil
-		}
-		if doc.Tokens != nil {
-			doc.Tokens = nil
-		}
-		if doc.AST != nil {
-			doc.AST = nil
-		}
-		if doc.Errors != nil {
-			doc.Errors = nil
-		}
+	debugLog.Printf("Content size: %d bytes", len(newContent))
 
-		doc.Content = params.ContentChanges[0].Text
-		doc.Lines = strings.Split(doc.Content, "\n")
-		doc.Version = params.TextDocument.Version
+	// Reparse - handle panics gracefully with timeout
+	parseSuccess := false
+	parseDone := make(chan bool, 1)
 
-		// Reparse - handle panics gracefully with timeout
-		parseSuccess := false
-		parseDone := make(chan bool, 1)
-
-		go func() {
-			defer func() {
-				if r := recover(); r != nil {
-					// Parser panicked - create error diagnostic
-					debugLog.Printf("Parser panic on change: %v", r)
-					doc.Errors = []ahoy.ParseError{
-						{
-							Line:    1,
-							Column:  1,
-							Message: fmt.Sprintf("Parser error: %v", r),
-						},
-					}
-					doc.AST = nil
-					doc.Tokens = nil
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				// Parser panicked - create error diagnostic
+				debugLog.Printf("Parser panic on change: %v", r)
+				newDoc.Errors = []ahoy.ParseError{
+					{
+						Line:    1,
+						Column:  1,
+						Message: fmt.Sprintf("Parser error: %v", r),
+					},
 				}
-				parseDone <- true
-			}()
-
-			// Tokenize and parse
-			doc.Tokens = ahoy.Tokenize(doc.Content)
-			debugLog.Printf("Tokenized on change: %d tokens", len(doc.Tokens))
-			// Convert URI to file path for relative import resolution
-			filePath := string(doc.URI)
-			if strings.HasPrefix(filePath, "file://") {
-				filePath = strings.TrimPrefix(filePath, "file://")
+				newDoc.AST = nil
+				newDoc.Tokens = nil
 			}
-			doc.AST, doc.Errors = ahoy.ParseSyntaxWithPath(doc.Tokens, filePath)
-			debugLog.Printf("Parsed (syntax) on change: %d errors", len(doc.Errors))
-			parseSuccess = true
+			parseDone <- true
 		}()
 
-		// Wait for parsing with timeout
-		select {
-		case <-parseDone:
-			if !parseSuccess {
-				debugLog.Printf("Parsing failed on change")
-			} else {
-				debugLog.Printf("Parsing completed on change")
-			}
-		case <-time.After(5 * time.Second):
-			debugLog.Printf("Parser timeout on change after 5 seconds!")
-			doc.Errors = []ahoy.ParseError{
-				{
-					Line:    1,
-					Column:  1,
-					Message: "Parser timeout - file may be too complex",
-				},
-			}
-			doc.AST = nil
-			doc.Tokens = nil
+		// Tokenize and parse
+		newDoc.Tokens = ahoy.Tokenize(newDoc.Content)
+		debugLog.Printf("Tokenized on change: %d tokens", len(newDoc.Tokens))
+		// Convert URI to file path for relative import resolution
+		filePath := string(newDoc.URI)
+		if strings.HasPrefix(filePath, "file://") {
+			filePath = strings.TrimPrefix(filePath, "file://")
 		}
+		newDoc.AST, newDoc.Errors = ahoy.ParseSyntaxWithPath(newDoc.Tokens, filePath)
+		debugLog.Printf("Parsed (syntax) on change: %d errors", len(newDoc.Errors))
+		parseSuccess = true
+	}()
 
-		// Rebuild symbol table - only if AST exists
-		if doc.AST != nil {
-			// Infer parameter types first
-			doc.InferredParams = inferParameterTypes(doc.AST, doc)
-			doc.SymbolTable = BuildSymbolTableWithFile(doc.AST, string(doc.URI), doc.InferredParams)
-			doc.SymbolTable.Doc = doc // Set document reference
-			// Extract C header imports
-			doc.CHeaders, doc.CHeaderGlobal = extractCHeaderInfoWithURI(doc.AST, doc.URI)
-
-			// Check if program name changed
-			newProgramName := extractProgramName(doc.AST)
-			if newProgramName != doc.ProgramName {
-				// Program name changed - clear old package data
-				if doc.ProgramName != "" && newProgramName == "" {
-					// Program declaration removed - clear package files
-					debugLog.Printf("Program declaration removed, clearing package files")
-					doc.PackageFiles = nil
-					doc.PackageSymbols = nil
-				}
-				doc.ProgramName = newProgramName
-			}
-
-			// Reload the program context. Sibling files only join when
-			// there is a program declaration, but imports apply to
-			// headerless library files too.
-			s.loadPackageFiles(doc)
-			s.revalidateWithProgramNames(doc)
+	// Wait for parsing with timeout
+	select {
+	case <-parseDone:
+		if !parseSuccess {
+			debugLog.Printf("Parsing failed on change")
 		} else {
-			doc.SymbolTable = NewSymbolTable()
-			doc.CHeaders = make(map[string]*ahoy.CHeaderInfo)
-			doc.CHeaderGlobal = &ahoy.CHeaderInfo{
-				Functions: make(map[string]*ahoy.CFunction),
-				Enums:     make(map[string]*ahoy.CEnum),
-				Defines:   make(map[string]*ahoy.CDefine),
-				Structs:   make(map[string]*ahoy.CStruct),
-				Typedefs:  make(map[string]*ahoy.CTypedef),
-			}
+			debugLog.Printf("Parsing completed on change")
+		}
+	case <-time.After(5 * time.Second):
+		debugLog.Printf("Parser timeout on change after 5 seconds!")
+		newDoc.Errors = []ahoy.ParseError{
+			{
+				Line:    1,
+				Column:  1,
+				Message: "Parser timeout - file may be too complex",
+			},
+		}
+		newDoc.AST = nil
+		newDoc.Tokens = nil
+	}
+
+	// Rebuild symbol table - only if AST exists
+	if newDoc.AST != nil {
+		// Infer parameter types first
+		newDoc.InferredParams = inferParameterTypes(newDoc.AST, newDoc)
+		newDoc.SymbolTable = BuildSymbolTableWithFile(newDoc.AST, string(newDoc.URI), newDoc.InferredParams)
+		newDoc.SymbolTable.Doc = newDoc // Set document reference
+		// Extract C header imports
+		newDoc.CHeaders, newDoc.CHeaderGlobal = extractCHeaderInfoWithURI(newDoc.AST, newDoc.URI)
+
+		// Carry over the program name; sibling/import context is rebuilt
+		// from scratch by loadPackageFiles below.
+		newDoc.ProgramName = extractProgramName(newDoc.AST)
+
+		// Reload the program context. Sibling files only join when
+		// there is a program declaration, but imports apply to
+		// headerless library files too.
+		s.loadPackageFiles(newDoc)
+		s.revalidateWithProgramNames(newDoc)
+	} else {
+		newDoc.SymbolTable = NewSymbolTable()
+		newDoc.CHeaders = make(map[string]*ahoy.CHeaderInfo)
+		newDoc.CHeaderGlobal = &ahoy.CHeaderInfo{
+			Functions: make(map[string]*ahoy.CFunction),
+			Enums:     make(map[string]*ahoy.CEnum),
+			Defines:   make(map[string]*ahoy.CDefine),
+			Structs:   make(map[string]*ahoy.CStruct),
+			Typedefs:  make(map[string]*ahoy.CTypedef),
 		}
 	}
+
+	// Swap under lock. If a newer edit already landed, drop this stale
+	// result instead of overwriting it.
+	s.mu.Lock()
+	current := s.documents[docURI]
+	if current == nil {
+		// Document closed while we parsed; publish nothing.
+		s.mu.Unlock()
+		return reply(ctx, nil, nil)
+	}
+	if newVersion < current.Version {
+		debugLog.Printf("Dropping stale didChange v%d (current v%d)", newVersion, current.Version)
+		s.mu.Unlock()
+		return reply(ctx, nil, nil)
+	}
+	// Explicitly clear old data to help GC and prevent memory leaks
+	if current.SymbolTable != nil {
+		current.SymbolTable.Clear()
+	}
+	current.Tokens = nil
+	current.AST = nil
+	current.Errors = nil
+	current.Content = ""
+	current.Lines = nil
+	current.PackageFiles = nil
+	current.PackageSymbols = nil
+	s.documents[docURI] = newDoc
 	s.mu.Unlock()
 
 	// Send diagnostics
-	s.publishDiagnostics(ctx, doc)
+	s.publishDiagnostics(ctx, newDoc)
 
 	return reply(ctx, nil, nil)
 }
