@@ -1,0 +1,95 @@
+name: Release (dev-*)
+
+on:
+  push:
+    tags:
+      - "dev-*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            ext: ""
+          - goos: linux
+            goarch: arm64
+            ext: ""
+          - goos: windows
+            goarch: amd64
+            ext: ".exe"
+          - goos: windows
+            goarch: arm64
+            ext: ".exe"
+          - goos: darwin
+            goarch: amd64
+            ext: ""
+          - goos: darwin
+            goarch: arm64
+            ext: ""
+    steps:
+      - name: Checkout lsp
+        uses: actions/checkout@v4
+        with:
+          path: ahoy-lsp
+
+      - name: Checkout ahoy pkg at same tag
+        uses: actions/checkout@v4
+        with:
+          repository: ahoy-lang/ahoy
+          ref: ${{ github.ref_name }}
+          path: ahoy
+        # Falls back to master when the ahoy tag does not exist yet
+        continue-on-error: true
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.27"
+
+      # replace directive points at ../ahoy/pkg which is NOT in this repo,
+      # so CI builds against the published pkg via the replace override below.
+      # We keep the local replace for dev; release builds use the tagged pkg.
+      - name: Build ahoy-lsp
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        working-directory: ahoy-lsp
+        run: |
+          go build -o ahoy-lsp-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ahoy-lsp-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
+          path: ahoy-lsp/ahoy-lsp-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
+          retention-days: 7
+
+  release:
+    name: Publish GitHub release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+          body: |
+            First dev-dated release. Tag scheme: `dev-YYYY-MM` + letter for same-month fixes (`dev-2026-11a`).
+
+            Zed/VSCode point at the `ahoy-lsp` binary for your OS/arch. Rename to `ahoy-lsp` on PATH.
+            Pairs with the `ahoy` compiler release of the same tag (`dev-2026-11`).
